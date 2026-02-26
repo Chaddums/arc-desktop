@@ -22,6 +22,7 @@ import {
   ProgressBar,
 } from "../components";
 import { useSettings } from "../hooks/useSettings";
+import { useAlertSettings } from "../hooks/useAlertSettings";
 import { clearAllCaches } from "../services/metaforge";
 import type { MoreViewMode, SquadMember } from "../types";
 import { useState, useCallback } from "react";
@@ -46,6 +47,8 @@ const DATA_SOURCES = [
 export default function MoreScreen() {
   const insets = useSafeAreaInsets();
   const { language, setLanguage } = useSettings();
+  const { settings: alertSettings, update: updateAlertSettings } = useAlertSettings();
+  const isDesktop = typeof window !== "undefined" && !!window.arcDesktop;
 
   const [viewMode, setViewMode] = useState<MoreViewMode>("menu");
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
@@ -221,6 +224,65 @@ export default function MoreScreen() {
         </Text>
       </Panel>
 
+      {isDesktop && (
+        <>
+          <Divider />
+
+          <Text style={styles.sectionTitle}>Notifications</Text>
+          <Panel>
+            <TouchableOpacity
+              style={styles.toggleRow}
+              onPress={() => updateAlertSettings({ notifyOnEvent: !alertSettings.notifyOnEvent })}
+            >
+              <Text style={styles.toggleLabel}>Event Notifications</Text>
+              <Text style={[styles.toggleValue, alertSettings.notifyOnEvent && styles.toggleOn]}>
+                {alertSettings.notifyOnEvent ? "ON" : "OFF"}
+              </Text>
+            </TouchableOpacity>
+
+            <Divider />
+
+            <TouchableOpacity
+              style={styles.toggleRow}
+              onPress={() => updateAlertSettings({ audioAlerts: !alertSettings.audioAlerts })}
+            >
+              <Text style={styles.toggleLabel}>Audio Alerts</Text>
+              <Text style={[styles.toggleValue, alertSettings.audioAlerts && styles.toggleOn]}>
+                {alertSettings.audioAlerts ? "ON" : "OFF"}
+              </Text>
+            </TouchableOpacity>
+
+            {alertSettings.audioAlerts && (
+              <>
+                <Divider />
+                <Text style={styles.volumeLabel}>Volume</Text>
+                <View style={styles.volumeRow}>
+                  {[0.25, 0.5, 0.75, 1.0].map((vol) => (
+                    <TouchableOpacity
+                      key={vol}
+                      style={[
+                        styles.volumePill,
+                        alertSettings.audioVolume === vol && styles.volumePillActive,
+                      ]}
+                      onPress={() => updateAlertSettings({ audioVolume: vol })}
+                    >
+                      <Text
+                        style={[
+                          styles.volumeText,
+                          alertSettings.audioVolume === vol && styles.volumeTextActive,
+                        ]}
+                      >
+                        {Math.round(vol * 100)}%
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
+          </Panel>
+        </>
+      )}
+
       <Divider />
 
       <Text style={styles.sectionTitle}>Data</Text>
@@ -357,4 +419,14 @@ const styles = StyleSheet.create({
   sourceName: { fontSize: 15, fontWeight: "700", color: Colors.text },
   sourceDesc: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
   sourceUrl: { fontSize: 11, color: Colors.accent, marginTop: 4 },
+  toggleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8 },
+  toggleLabel: { fontSize: 14, fontWeight: "600", color: Colors.text },
+  toggleValue: { fontSize: 13, fontWeight: "700", color: Colors.textMuted },
+  toggleOn: { color: Colors.accent },
+  volumeLabel: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginTop: 4, marginBottom: 6 },
+  volumeRow: { flexDirection: "row", gap: 8 },
+  volumePill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, borderWidth: 1, borderColor: Colors.border },
+  volumePillActive: { borderColor: Colors.accent, backgroundColor: "rgba(0, 180, 216, 0.15)" },
+  volumeText: { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
+  volumeTextActive: { color: Colors.accent },
 });

@@ -20,6 +20,7 @@ import LoadoutScreen from "./src/screens/LoadoutScreen";
 import MarketScreen from "./src/screens/MarketScreen";
 import MissionsScreen from "./src/screens/MissionsScreen";
 import MoreScreen from "./src/screens/MoreScreen";
+import OverlayHUD from "./src/components/OverlayHUD";
 import { Colors } from "./src/theme";
 
 const Tab = createBottomTabNavigator();
@@ -52,6 +53,12 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 }
 
 export default function App() {
+  const isOverlay =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("overlay");
+
+  if (isOverlay) return <OverlayHUD />;
+
   return (
     <SafeAreaProvider>
       <NavigationContainer

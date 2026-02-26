@@ -40,5 +40,31 @@
     "electron-builder": "^25.1.8",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "build": {
+    "appId": "com.couloir.arcview",
+    "productName": "ARC View",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/tray-icon.png",
+      "assets/sounds/**/*"
+    ],
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "shortcutName": "ARC View"
+    }
+  }
 }

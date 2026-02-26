@@ -78,6 +78,8 @@ export default function LoadoutScreen() {
     raidEntries,
     raidStats,
     addRaidEntry,
+    // Checklist
+    addToChecklist,
     // Common
     loading,
     error,
@@ -210,6 +212,14 @@ export default function LoadoutScreen() {
           >
             <Text style={styles.actionButtonText}>Advisor</Text>
           </TouchableOpacity>
+          {typeof window !== "undefined" && window.arcDesktop && (
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => addToChecklist(itemDetail.name, 1)}
+            >
+              <Text style={styles.actionButtonText}>Pin to Overlay</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </>
     );

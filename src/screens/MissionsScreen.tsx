@@ -25,6 +25,7 @@ import {
 } from "../components";
 import { useMissions } from "../hooks/useMissions";
 import { useCompletedQuests } from "../hooks/useCompletedQuests";
+import { useLoadoutChecklist } from "../hooks/useLoadoutChecklist";
 import { loc } from "../utils/loc";
 import type { MissionsViewMode } from "../types";
 
@@ -76,6 +77,7 @@ export default function MissionsScreen() {
   } = useMissions();
 
   const { completedIds, markComplete, markIncomplete } = useCompletedQuests();
+  const { addItem: addToChecklist } = useLoadoutChecklist();
 
   const renderTraderList = () => (
     <>
@@ -276,11 +278,25 @@ export default function MissionsScreen() {
       {shoppingList.length === 0 ? (
         <EmptyState title="Select station tiers to build a shopping list" />
       ) : (
-        <Panel>
-          {shoppingList.map((mat) => (
-            <MaterialRow key={mat.itemId} material={mat} />
-          ))}
-        </Panel>
+        <>
+          <Panel>
+            {shoppingList.map((mat) => (
+              <MaterialRow key={mat.itemId} material={mat} />
+            ))}
+          </Panel>
+          {typeof window !== "undefined" && window.arcDesktop && (
+            <TouchableOpacity
+              style={styles.shoppingButton}
+              onPress={() => {
+                shoppingList.forEach((mat) =>
+                  addToChecklist(mat.itemName || mat.itemId, mat.quantity)
+                );
+              }}
+            >
+              <Text style={styles.shoppingButtonText}>Pin All to Overlay</Text>
+            </TouchableOpacity>
+          )}
+        </>
       )}
     </>
   );

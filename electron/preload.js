@@ -1,1 +1,57 @@
-// Preload script — placeholder for future contextBridge / ipcRenderer usage
+/**
+ * Preload script — contextBridge API for ARC View Desktop overlay.
+ * Exposes `window.arcDesktop` to renderer processes.
+ */
+
+const { contextBridge, ipcRenderer } = require("electron");
+
+const isOverlay = new URLSearchParams(window.location.search).has("overlay");
+
+contextBridge.exposeInMainWorld("arcDesktop", {
+  /** True when this window was loaded with ?overlay=1 */
+  isOverlay,
+
+  /** Get current mode ("main" | "overlay") */
+  getMode: () => ipcRenderer.invoke("get-mode"),
+
+  /** Listen for mode changes */
+  onModeChange: (cb) => {
+    const handler = (_event, mode) => cb(mode);
+    ipcRenderer.on("mode-changed", handler);
+    return () => ipcRenderer.removeListener("mode-changed", handler);
+  },
+
+  /** Toggle click-through on the overlay window */
+  setIgnoreMouseEvents: (ignore, opts) => {
+    ipcRenderer.send("set-ignore-mouse-events", ignore, opts || {});
+  },
+
+  /** Listen for game running/stopped status */
+  onGameStatusChange: (cb) => {
+    const handler = (_event, running) => cb(running);
+    ipcRenderer.on("game-status", handler);
+    return () => ipcRenderer.removeListener("game-status", handler);
+  },
+
+  /** Resize overlay window (used by checklist) */
+  resizeOverlay: (width, height) => {
+    ipcRenderer.send("overlay-resize", width, height);
+  },
+
+  /** Notify main process that an event started */
+  notifyEventStarted: (event) => {
+    ipcRenderer.send("event-started", event);
+  },
+
+  /** Update alert settings in main process */
+  updateAlertSettings: (settings) => {
+    ipcRenderer.send("update-alert-settings", settings);
+  },
+
+  /** Listen for play-alert-sound signal */
+  onPlayAlertSound: (cb) => {
+    const handler = (_event) => cb();
+    ipcRenderer.on("play-alert-sound", handler);
+    return () => ipcRenderer.removeListener("play-alert-sound", handler);
+  },
+});

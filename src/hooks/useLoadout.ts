@@ -12,6 +12,7 @@ import { useRiskScore } from "./useRiskScore";
 import { useRaidLog } from "./useRaidLog";
 import { useEnemyBrowser } from "./useEnemyBrowser";
 import { useEventTimer } from "./useEventTimer";
+import { useLoadoutChecklist } from "./useLoadoutChecklist";
 import type { LoadoutViewMode, RaidOutcome } from "../types";
 
 export function useLoadout() {
@@ -25,6 +26,7 @@ export function useLoadout() {
   const raidLog = useRaidLog();
   const enemyBrowser = useEnemyBrowser();
   const eventTimer = useEventTimer();
+  const checklist = useLoadoutChecklist();
 
   const [compareItems, setCompareItems] = useState<string[]>([]);
 
@@ -115,6 +117,12 @@ export function useLoadout() {
     raidEntries: raidLog.entries,
     raidStats: raidLog.loadoutStats,
     addRaidEntry,
+    // Checklist
+    checklistItems: checklist.items,
+    addToChecklist: checklist.addItem,
+    toggleChecklistItem: checklist.toggleItem,
+    removeChecklistItem: checklist.removeItem,
+    clearCheckedItems: checklist.clearChecked,
     // Common
     loading: itemBrowser.loading || skillTree.loading,
     error: itemBrowser.error || skillTree.error,
