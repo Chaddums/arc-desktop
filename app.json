@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "ARC View",
+    "slug": "arc-view",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "arc-view",
+    "newArchEnabled": false,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0e12"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.couloirgg.arc.view"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0e12"
+      },
+      "package": "com.couloirgg.arc.view",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-splash-screen",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "eas": {}
+    }
+  }
+}
