@@ -9,7 +9,11 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:web": "npx expo export --platform web",
+    "electron": "npm run build:web && electron electron/main.js",
+    "electron-dev": "electron electron/main.js --dev",
+    "dist": "npm run build:web && electron-builder"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -32,6 +36,8 @@
     "@babel/core": "^7.24.0",
     "@types/react": "~19.1.0",
     "babel-preset-expo": "^54.0.10",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
     "typescript": "~5.9.2"
   },
   "private": true
