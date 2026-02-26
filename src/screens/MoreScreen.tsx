@@ -23,6 +23,7 @@ import {
 } from "../components";
 import { useSettings } from "../hooks/useSettings";
 import { useAlertSettings } from "../hooks/useAlertSettings";
+import { useOCRSettings } from "../hooks/useOCRSettings";
 import { clearAllCaches } from "../services/metaforge";
 import type { MoreViewMode, SquadMember } from "../types";
 import { useState, useCallback } from "react";
@@ -48,7 +49,9 @@ export default function MoreScreen() {
   const insets = useSafeAreaInsets();
   const { language, setLanguage } = useSettings();
   const { settings: alertSettings, update: updateAlertSettings } = useAlertSettings();
+  const { settings: ocrSettings, update: updateOCRSettings } = useOCRSettings();
   const isDesktop = typeof window !== "undefined" && !!window.arcDesktop;
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   const [viewMode, setViewMode] = useState<MoreViewMode>("menu");
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
@@ -280,6 +283,131 @@ export default function MoreScreen() {
               </>
             )}
           </Panel>
+
+          <Divider />
+
+          <Text style={styles.sectionTitle}>Quest Auto-Tracker</Text>
+          <Panel>
+            <TouchableOpacity
+              style={styles.toggleRow}
+              onPress={() => updateOCRSettings({ enabled: !ocrSettings.enabled })}
+            >
+              <Text style={styles.toggleLabel}>Auto-Track</Text>
+              <Text style={[styles.toggleValue, ocrSettings.enabled && styles.toggleOn]}>
+                {ocrSettings.enabled ? "ON" : "OFF"}
+              </Text>
+            </TouchableOpacity>
+
+            {ocrSettings.enabled && (
+              <>
+                <Divider />
+                <Text style={styles.volumeLabel}>Capture Speed</Text>
+                <View style={styles.volumeRow}>
+                  {[
+                    { label: "Fast", ms: 1000 },
+                    { label: "Normal", ms: 1500 },
+                    { label: "Battery Saver", ms: 3000 },
+                  ].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.ms}
+                      style={[
+                        styles.volumePill,
+                        ocrSettings.captureIntervalMs === opt.ms && styles.volumePillActive,
+                      ]}
+                      onPress={() => updateOCRSettings({ captureIntervalMs: opt.ms })}
+                    >
+                      <Text
+                        style={[
+                          styles.volumeText,
+                          ocrSettings.captureIntervalMs === opt.ms && styles.volumeTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Divider />
+                <Text style={styles.volumeLabel}>Match Sensitivity</Text>
+                <View style={styles.volumeRow}>
+                  {[
+                    { label: "Strict", val: 0.85 },
+                    { label: "Normal", val: 0.7 },
+                    { label: "Loose", val: 0.55 },
+                  ].map((opt) => (
+                    <TouchableOpacity
+                      key={opt.val}
+                      style={[
+                        styles.volumePill,
+                        ocrSettings.matchThreshold === opt.val && styles.volumePillActive,
+                      ]}
+                      onPress={() => updateOCRSettings({ matchThreshold: opt.val })}
+                    >
+                      <Text
+                        style={[
+                          styles.volumeText,
+                          ocrSettings.matchThreshold === opt.val && styles.volumeTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Divider />
+                <Text style={styles.volumeLabel}>Active Zones</Text>
+                {[
+                  { id: "objectiveComplete", label: "Objective Complete (top-center)" },
+                  { id: "itemPickup", label: "Item Pickup (lower-right)" },
+                  { id: "killFeed", label: "Kill Feed (upper-right)" },
+                  { id: "centerPopup", label: "Center Popup" },
+                ].map((zone) => {
+                  const active = ocrSettings.activeZones.includes(zone.id);
+                  return (
+                    <TouchableOpacity
+                      key={zone.id}
+                      style={styles.toggleRow}
+                      onPress={() => {
+                        const zones = active
+                          ? ocrSettings.activeZones.filter((z) => z !== zone.id)
+                          : [...ocrSettings.activeZones, zone.id];
+                        updateOCRSettings({ activeZones: zones });
+                      }}
+                    >
+                      <Text style={styles.zoneLabel}>{zone.label}</Text>
+                      <Text style={[styles.toggleValue, active && styles.toggleOn]}>
+                        {active ? "ON" : "OFF"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                <Divider />
+                <TouchableOpacity
+                  style={styles.testButton}
+                  onPress={async () => {
+                    setTestResult("Capturing...");
+                    const result = await window.arcDesktop?.testOCRCapture?.();
+                    if (result) {
+                      setTestResult(
+                        `Screen: ${result.screenWidth}x${result.screenHeight}\n` +
+                        result.zones.map((z) => `${z.zone}: ${z.width}x${z.height}`).join("\n")
+                      );
+                    } else {
+                      setTestResult("Capture failed — is the game running?");
+                    }
+                  }}
+                >
+                  <Text style={styles.testButtonText}>Test Capture</Text>
+                </TouchableOpacity>
+                {testResult && (
+                  <Text style={styles.testResultText}>{testResult}</Text>
+                )}
+              </>
+            )}
+          </Panel>
         </>
       )}
 
@@ -429,4 +557,8 @@ const styles = StyleSheet.create({
   volumePillActive: { borderColor: Colors.accent, backgroundColor: "rgba(0, 180, 216, 0.15)" },
   volumeText: { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
   volumeTextActive: { color: Colors.accent },
+  zoneLabel: { fontSize: 13, fontWeight: "500", color: Colors.text },
+  testButton: { backgroundColor: "rgba(0, 180, 216, 0.12)", borderWidth: 1, borderColor: Colors.borderAccent, borderRadius: 8, padding: 10, alignItems: "center", marginTop: 4 },
+  testButtonText: { fontSize: 13, fontWeight: "700", color: Colors.accent },
+  testResultText: { fontSize: 11, color: Colors.textSecondary, marginTop: 6, fontFamily: "monospace" },
 });

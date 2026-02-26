@@ -54,4 +54,30 @@ contextBridge.exposeInMainWorld("arcDesktop", {
     ipcRenderer.on("play-alert-sound", handler);
     return () => ipcRenderer.removeListener("play-alert-sound", handler);
   },
+
+  // ─── OCR ──────────────────────────────────────────────────────
+
+  /** Start OCR scanning */
+  startOCR: () => ipcRenderer.send("start-ocr"),
+
+  /** Stop OCR scanning */
+  stopOCR: () => ipcRenderer.send("stop-ocr"),
+
+  /** Listen for OCR results */
+  onOCRResult: (cb) => {
+    const handler = (_event, result) => cb(result);
+    ipcRenderer.on("ocr-result", handler);
+    return () => ipcRenderer.removeListener("ocr-result", handler);
+  },
+
+  /** Update OCR settings in main process */
+  updateOCRSettings: (settings) => {
+    ipcRenderer.send("update-ocr-settings", settings);
+  },
+
+  /** Get current OCR scanning status */
+  getOCRStatus: () => ipcRenderer.invoke("get-ocr-status"),
+
+  /** Run a test capture and return zone info */
+  testOCRCapture: () => ipcRenderer.invoke("test-ocr-capture"),
 });

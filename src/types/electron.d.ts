@@ -3,6 +3,32 @@
  * Available as `window.arcDesktop` when running inside arc-desktop.
  */
 
+interface OCRResult {
+  text: string;
+  zone: string;
+  confidence: number;
+  timestamp: number;
+  error?: string;
+}
+
+interface OCRSettings {
+  enabled: boolean;
+  captureIntervalMs: number;
+  matchThreshold: number;
+  activeZones: string[];
+}
+
+interface OCRStatus {
+  scanning: boolean;
+  workerReady: boolean;
+}
+
+interface OCRTestResult {
+  screenWidth: number;
+  screenHeight: number;
+  zones: { zone: string; width: number; height: number }[];
+}
+
 interface ArcDesktopAPI {
   /** True when this window was loaded with ?overlay=1 */
   isOverlay: boolean;
@@ -34,6 +60,26 @@ interface ArcDesktopAPI {
 
   /** Listen for play-alert-sound signal. Returns unsubscribe function. */
   onPlayAlertSound: (cb: () => void) => () => void;
+
+  // ─── OCR ──────────────────────────────────────────────────────
+
+  /** Start OCR scanning */
+  startOCR: () => void;
+
+  /** Stop OCR scanning */
+  stopOCR: () => void;
+
+  /** Listen for OCR results. Returns unsubscribe function. */
+  onOCRResult: (cb: (result: OCRResult) => void) => () => void;
+
+  /** Update OCR settings in main process */
+  updateOCRSettings: (settings: Partial<OCRSettings>) => void;
+
+  /** Get current OCR scanning status */
+  getOCRStatus: () => Promise<OCRStatus>;
+
+  /** Run a test capture and return zone info */
+  testOCRCapture: () => Promise<OCRTestResult | null>;
 }
 
 declare global {

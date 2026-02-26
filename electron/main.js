@@ -1,6 +1,8 @@
 const {
   app,
   BrowserWindow,
+  protocol,
+  net,
   globalShortcut,
   ipcMain,
   Tray,
@@ -8,61 +10,33 @@ const {
   nativeImage,
   Notification,
 } = require("electron");
-const http = require("http");
+const { pathToFileURL } = require("url");
 const path = require("path");
 const fs = require("fs");
 
 const DEV = process.argv.includes("--dev");
 const DIST = path.join(__dirname, "..", "dist");
 
-const MIME = {
-  ".html": "text/html",
-  ".js": "application/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".ico": "image/x-icon",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".mp3": "audio/mpeg",
-};
-
 // ─── State ──────────────────────────────────────────────────────
 let mainWindow = null;
 let overlayWindow = null;
 let tray = null;
 let currentMode = "main"; // "main" | "overlay"
-let serverUrl = null;
+let serverUrl = DEV ? "http://localhost:8081" : "app://dist/index.html";
 let gameDetector = null;
+let screenCapture = null;
 
 // ─── Alert settings ─────────────────────────────────────────────
 let alertSettings = { notifyOnEvent: true, audioAlerts: true, audioVolume: 0.75 };
 const notifiedEvents = new Set();
 
-// ─── Static file server ─────────────────────────────────────────
-function serve(dir) {
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
-      const pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
-      let filePath = path.join(dir, pathname);
-
-      if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) {
-        filePath = path.join(filePath, "index.html");
-      }
-
-      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-        const ext = path.extname(filePath);
-        res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream" });
-        fs.createReadStream(filePath).pipe(res);
-      } else {
-        // SPA fallback
-        res.writeHead(200, { "Content-Type": "text/html" });
-        fs.createReadStream(path.join(dir, "index.html")).pipe(res);
-      }
-    });
-
-    server.listen(0, "127.0.0.1", () => resolve(server.address().port));
-  });
-}
+// ─── OCR settings ───────────────────────────────────────────────
+let ocrSettings = {
+  enabled: true,
+  captureIntervalMs: 1500,
+  matchThreshold: 0.7,
+  activeZones: ["objectiveComplete", "itemPickup", "killFeed", "centerPopup"],
+};
 
 // ─── Windows ────────────────────────────────────────────────────
 function createMainWindow(url) {
@@ -86,6 +60,7 @@ function createMainWindow(url) {
   });
 
   mainWindow.on("close", (e) => {
+    // If tray exists, hide to tray instead of quitting
     if (tray && !app.isQuitting) {
       e.preventDefault();
       mainWindow.hide();
@@ -120,6 +95,7 @@ function createOverlayWindow(url) {
     },
   });
 
+  // Set always-on-top level for in-game overlay
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
 
   overlayWindow.on("closed", () => {
@@ -162,6 +138,7 @@ function createTray() {
   if (fs.existsSync(iconPath)) {
     icon = nativeImage.createFromPath(iconPath).resize({ width: 32, height: 32 });
   } else {
+    // Fallback: use app icon or create empty
     icon = nativeImage.createEmpty();
   }
 
@@ -238,6 +215,8 @@ ipcMain.on("event-started", (_event, eventData) => {
   const key = `${eventData.name}-${eventData.map}`;
   if (notifiedEvents.has(key)) return;
   notifiedEvents.add(key);
+
+  // Clear from set after 10 minutes to allow re-notification
   setTimeout(() => notifiedEvents.delete(key), 10 * 60 * 1000);
 
   if (Notification.isSupported()) {
@@ -258,35 +237,94 @@ ipcMain.on("update-alert-settings", (_event, settings) => {
   alertSettings = { ...alertSettings, ...settings };
 });
 
-// ─── App Lifecycle ──────────────────────────────────────────────
-app.whenReady().then(async () => {
-  if (DEV) {
-    serverUrl = "http://localhost:8081";
-  } else {
-    const port = await serve(DIST);
-    serverUrl = `http://127.0.0.1:${port}`;
+// ─── OCR IPC Handlers ───────────────────────────────────────────
+ipcMain.on("start-ocr", () => {
+  if (screenCapture && ocrSettings.enabled) screenCapture.start();
+});
+
+ipcMain.on("stop-ocr", () => {
+  if (screenCapture) screenCapture.stop();
+});
+
+ipcMain.on("update-ocr-settings", (_event, settings) => {
+  ocrSettings = { ...ocrSettings, ...settings };
+  if (screenCapture) {
+    screenCapture.updateSettings(ocrSettings);
+    if (!ocrSettings.enabled) screenCapture.stop();
   }
+});
+
+ipcMain.handle("get-ocr-status", () => ({
+  scanning: screenCapture ? screenCapture.scanning : false,
+  workerReady: screenCapture ? screenCapture.workerReady : false,
+}));
+
+ipcMain.handle("test-ocr-capture", async () => {
+  if (!screenCapture) return null;
+  return screenCapture.testCapture();
+});
+
+// ─── Custom Protocol ────────────────────────────────────────────
+protocol.registerSchemesAsPrivileged([
+  { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
+
+// ─── App Lifecycle ──────────────────────────────────────────────
+app.whenReady().then(() => {
+  // protocol.handle is the modern API (Electron 25+)
+  protocol.handle("app", (request) => {
+    const { pathname } = new URL(request.url);
+    const filePath = path.join(DIST, decodeURIComponent(pathname));
+
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      return net.fetch(pathToFileURL(filePath).href);
+    }
+    // SPA fallback
+    return net.fetch(pathToFileURL(path.join(DIST, "index.html")).href);
+  });
 
   createMainWindow(serverUrl);
   createOverlayWindow(serverUrl);
   createTray();
 
-  // Game detection
+  // Screen capture for OCR
+  try {
+    const ScreenCapture = require("./screenCapture");
+    screenCapture = new ScreenCapture((result) => {
+      broadcast("ocr-result", result);
+    });
+    screenCapture.updateSettings(ocrSettings);
+  } catch {
+    // screenCapture deps not available
+  }
+
+  // Game detection (lazy-loaded)
   try {
     const GameDetector = require("./gameDetector");
     gameDetector = new GameDetector();
     gameDetector.onChange((running) => {
       broadcast("game-status", running);
       updateTrayMenu();
+
+      // Auto-switch: game starts → overlay, game stops → main
       if (running && currentMode === "main") {
         toggleMode();
       } else if (!running && currentMode === "overlay") {
         toggleMode();
       }
+
+      // OCR: start scanning when game runs, stop when it exits
+      if (screenCapture && ocrSettings.enabled) {
+        if (running) {
+          screenCapture.start();
+        } else {
+          screenCapture.stop();
+        }
+      }
     });
     gameDetector.start();
   } catch {
-    // gameDetector.js not available
+    // gameDetector.js not yet created — Phase 2
   }
 
   // F9 = toggle overlay
@@ -300,8 +338,10 @@ app.whenReady().then(async () => {
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   if (gameDetector) gameDetector.stop();
+  if (screenCapture) screenCapture.destroy();
 });
 
 app.on("window-all-closed", () => {
+  // Keep running if tray exists
   if (!tray && process.platform !== "darwin") app.quit();
 });

@@ -4,15 +4,23 @@
  * Mouse enter/leave toggles click-through via IPC.
  */
 
-import React, { useEffect, useCallback } from "react";
+import React, { useEffect, useCallback, useState } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { useEventTimer } from "../hooks/useEventTimer";
+import { useAutoQuestTracker } from "../hooks/useAutoQuestTracker";
+import { useQuestTracker } from "../hooks/useQuestTracker";
+import { useAlertSettings } from "../hooks/useAlertSettings";
 import { formatCountdown } from "../utils/format";
 import { Colors } from "../theme";
 import OverlayChecklist from "./OverlayChecklist";
+import OverlayQuestProgress from "./OverlayQuestProgress";
 
 export default function OverlayHUD() {
   const { activeEvents, upcomingEvents, now } = useEventTimer();
+  const { questsByTrader } = useQuestTracker();
+  const allQuests = Object.values(questsByTrader).flat();
+  const { completionQueue, dismissCompletion } = useAutoQuestTracker(allQuests);
+  const { settings: alertSettings } = useAlertSettings();
 
   const nextEvent = upcomingEvents[0];
   const countdown = nextEvent ? nextEvent.startTime - now : null;
@@ -74,6 +82,11 @@ export default function OverlayHUD() {
           </>
         )}
       </View>
+      <OverlayQuestProgress
+        completionQueue={completionQueue}
+        onDismiss={dismissCompletion}
+        audioVolume={alertSettings.audioVolume}
+      />
       <OverlayChecklist />
     </div>
   );
