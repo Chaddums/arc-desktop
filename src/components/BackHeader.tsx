@@ -23,14 +23,14 @@ export default function BackHeader({ title, onBack }: BackHeaderProps) {
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 8,
+    marginBottom: 6,
   },
   backButton: {
     flexDirection: "row",
     alignItems: "center",
   },
   backText: {
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.accent,
     fontWeight: "600",
   },

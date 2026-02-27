@@ -80,6 +80,23 @@ interface ArcDesktopAPI {
 
   /** Run a test capture and return zone info */
   testOCRCapture: () => Promise<OCRTestResult | null>;
+
+  // ─── Window Controls (frameless title bar) ──────────────────
+
+  /** Minimize the window */
+  windowMinimize: () => void;
+
+  /** Toggle maximize/unmaximize */
+  windowMaximize: () => void;
+
+  /** Close the window */
+  windowClose: () => void;
+
+  /** Check if window is maximized */
+  windowIsMaximized: () => Promise<boolean>;
+
+  /** Set window to a size preset */
+  windowSetSize: (preset: "default" | "large" | "xl") => void;
 }
 
 declare global {

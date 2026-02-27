@@ -3,7 +3,7 @@
  * loadout assessment, keep/sell advisor, risk score, raid log.
  */
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Colors, rarityColors } from "../theme";
+import { Colors, rarityColors, spacing, fontSize as fs } from "../theme";
 import {
   Panel,
   Divider,
@@ -31,9 +31,58 @@ import {
 import { Sparkline } from "../components";
 import { useLoadout } from "../hooks/useLoadout";
 import { loc } from "../utils/loc";
-import type { LoadoutViewMode } from "../types";
+import type { LoadoutViewMode, MetaForgeItem } from "../types";
 
 const ITEM_CATEGORIES = ["Weapon", "Armor", "Consumable", "Material", "Key"];
+
+// ─── Equipment Slot Grid config ──────────────────────────────────
+const EQUIPMENT_SLOTS = [
+  { key: "weapon", label: "Weapon", icon: "W" },
+  { key: "armor", label: "Armor", icon: "A" },
+  { key: "helmet", label: "Helmet", icon: "H" },
+  { key: "backpack", label: "Backpack", icon: "B" },
+  { key: "gadget", label: "Gadget", icon: "G" },
+  { key: "consumable", label: "Consumable", icon: "C" },
+] as const;
+
+// ─── Build classification helper ────────────────────────────────
+type BuildClass = "DPS" | "Tank" | "Support" | "Hybrid";
+
+function classifyBuild(statBlock?: Record<string, number | undefined>): BuildClass {
+  if (!statBlock) return "Hybrid";
+  const dmg = (statBlock.damage ?? 0) + (statBlock.fireRate ?? 0);
+  const sup = (statBlock.agility ?? 0) + (statBlock.stealth ?? 0);
+  const tank = statBlock.weight ?? 0;
+  const max = Math.max(dmg, sup, tank);
+  if (max === 0) return "Hybrid";
+  if (dmg >= sup && dmg >= tank && dmg > 0) return "DPS";
+  if (tank >= dmg && tank >= sup && tank > 0) return "Tank";
+  if (sup >= dmg && sup >= tank && sup > 0) return "Support";
+  return "Hybrid";
+}
+
+const BUILD_CLASS_COLORS: Record<BuildClass, string> = {
+  DPS: Colors.red,
+  Tank: Colors.accent,
+  Support: Colors.green,
+  Hybrid: Colors.amber,
+};
+
+// ─── Stat quality helper ────────────────────────────────────────
+function getStatQuality(value: number): { color: string; label: string } {
+  if (value >= 80) return { color: Colors.green, label: "Excellent" };
+  if (value >= 60) return { color: Colors.accent, label: "Good" };
+  if (value >= 40) return { color: Colors.amber, label: "Average" };
+  return { color: Colors.red, label: "Weak" };
+}
+
+// ─── Average stat value for an item ─────────────────────────────
+function avgStatValue(item: MetaForgeItem): number {
+  if (!item.stat_block) return 0;
+  const vals = Object.values(item.stat_block).filter((v): v is number => v != null);
+  if (vals.length === 0) return 0;
+  return Math.round(vals.reduce((s, v) => s + v, 0) / vals.length);
+}
 
 export default function LoadoutScreen() {
   const insets = useSafeAreaInsets();
@@ -87,6 +136,9 @@ export default function LoadoutScreen() {
     refresh,
   } = useLoadout();
 
+  // ─── Local state for equipment slot filter ────────────────────
+  const [activeSlot, setActiveSlot] = useState<string | null>(null);
+
   const filteredItems = useMemo(() => {
     let list = items;
     if (selectedCategory) {
@@ -94,15 +146,67 @@ export default function LoadoutScreen() {
         item.item_type?.toLowerCase().includes(selectedCategory.toLowerCase())
       );
     }
+    if (activeSlot) {
+      list = list.filter((item) =>
+        item.item_type?.toLowerCase().includes(activeSlot.toLowerCase())
+      );
+    }
     if (itemSearch) {
       const q = itemSearch.toLowerCase();
       list = list.filter((item) => item.name.toLowerCase().includes(q));
     }
     return list;
-  }, [items, selectedCategory, itemSearch]);
+  }, [items, selectedCategory, activeSlot, itemSearch]);
 
+  // ─── KPI computations for item browser ────────────────────────
+  const browserKPI = useMemo(() => {
+    const total = items.length;
+    const equipped = items.filter(
+      (it) => it.loadout_slots && it.loadout_slots.length > 0
+    ).length;
+    const avgQuality =
+      total > 0
+        ? Math.round(items.reduce((s, it) => s + avgStatValue(it), 0) / total)
+        : 0;
+    return { total, equipped, avgQuality };
+  }, [items]);
+
+  // ─── Compare: allow selecting items from browse list ──────────
+  const toggleCompareItem = useCallback(
+    (id: string) => {
+      setCompareItems((prev: string[]) => {
+        if (prev.includes(id)) return prev.filter((x: string) => x !== id);
+        if (prev.length >= 2) return [prev[1], id]; // rotate: drop oldest
+        return [...prev, id];
+      });
+    },
+    [setCompareItems]
+  );
+
+  // ─── Equipment slot grid handler ──────────────────────────────
+  const handleSlotPress = useCallback(
+    (key: string) => {
+      setActiveSlot((prev) => (prev === key ? null : key));
+    },
+    []
+  );
+
+  // ══════════════════════════════════════════════════════════════
+  //  ITEM BROWSER
+  // ══════════════════════════════════════════════════════════════
   const renderItemBrowser = () => (
     <>
+      {/* Upgrade priority KPI bar */}
+      <KPIBar
+        cells={[
+          { label: "Total Items", value: String(browserKPI.total) },
+          { label: "Equipped", value: String(browserKPI.equipped), color: Colors.accent },
+          { label: "Avg Quality", value: String(browserKPI.avgQuality), color: browserKPI.avgQuality >= 60 ? Colors.green : Colors.amber },
+        ]}
+      />
+
+      <View style={styles.kpiGap} />
+
       <SearchBar value={itemSearch} onChangeText={setItemSearch} placeholder="Search items..." />
       <FilterPills
         options={ITEM_CATEGORIES}
@@ -111,13 +215,36 @@ export default function LoadoutScreen() {
         allLabel="All Items"
       />
 
+      {/* Equipment slot grid (3x2) */}
+      <View style={styles.slotGrid}>
+        {EQUIPMENT_SLOTS.map((slot) => {
+          const isActive = activeSlot === slot.key;
+          return (
+            <TouchableOpacity
+              key={slot.key}
+              style={[styles.slotCell, isActive && styles.slotCellActive]}
+              onPress={() => handleSlotPress(slot.key)}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.slotIcon, isActive && styles.slotIconActive]}>
+                {slot.icon}
+              </Text>
+              <Text style={[styles.slotLabel, isActive && styles.slotLabelActive]}>
+                {slot.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       {/* Quick nav row */}
       <View style={styles.quickNav}>
         {[
-          { label: "Skills", icon: "🧠", mode: "skillTree" as LoadoutViewMode },
-          { label: "Damage", icon: "💥", mode: "damageSim" as LoadoutViewMode },
-          { label: "Risk", icon: "⚠", mode: "riskScore" as LoadoutViewMode },
-          { label: "Raid Log", icon: "📊", mode: "raidLog" as LoadoutViewMode },
+          { label: "Skills", icon: "S", mode: "skillTree" as LoadoutViewMode },
+          { label: "Damage", icon: "D", mode: "damageSim" as LoadoutViewMode },
+          { label: "Compare", icon: "C", mode: "itemCompare" as LoadoutViewMode },
+          { label: "Risk", icon: "!", mode: "riskScore" as LoadoutViewMode },
+          { label: "Raid Log", icon: "R", mode: "raidLog" as LoadoutViewMode },
         ].map((item) => (
           <TouchableOpacity
             key={item.mode}
@@ -132,29 +259,41 @@ export default function LoadoutScreen() {
 
       <View style={styles.listPad}>
         {filteredItems.length === 0 ? (
-          <EmptyState icon="🔍" title="No items found" hint={loading ? "Loading..." : "Try a different search"} />
+          <EmptyState icon="?" title="No items found" hint={loading ? "Loading..." : "Try a different search"} />
         ) : (
-          filteredItems.map((item) => (
-            <ItemRow
-              key={item.id}
-              name={item.name}
-              subtitle={item.item_type}
-              rarity={item.rarity}
-              rightText={item.value != null ? String(item.value) : undefined}
-              onPress={() => {
-                setSelectedItem(item.id);
-                setViewMode("itemDetail");
-              }}
-            />
-          ))
+          filteredItems.map((item, idx) => {
+            const avg = avgStatValue(item);
+            const needsUpgrade = avg > 0 && avg < 40;
+            return (
+              <View key={item.id} style={idx % 2 === 1 ? styles.rowAlt : undefined}>
+                <ItemRow
+                  name={item.name}
+                  subtitle={
+                    item.item_type +
+                    (needsUpgrade ? "  |  ^ Upgrade" : "")
+                  }
+                  rarity={item.rarity}
+                  rightText={item.value != null ? String(item.value) : undefined}
+                  onPress={() => {
+                    setSelectedItem(item.id);
+                    setViewMode("itemDetail");
+                  }}
+                />
+              </View>
+            );
+          })
         )}
       </View>
     </>
   );
 
+  // ══════════════════════════════════════════════════════════════
+  //  ITEM DETAIL
+  // ══════════════════════════════════════════════════════════════
   const renderItemDetail = () => {
     if (!itemDetail) return <EmptyState title="Item not found" />;
     const stats = itemDetail.stat_block;
+    const buildClass = classifyBuild(stats);
 
     return (
       <>
@@ -173,6 +312,15 @@ export default function LoadoutScreen() {
             {itemDetail.value != null && <Text style={styles.valueBadge}>{itemDetail.value} value</Text>}
           </View>
 
+          {/* Build classification tag */}
+          <View style={styles.buildTagRow}>
+            <View style={[styles.buildTag, { backgroundColor: BUILD_CLASS_COLORS[buildClass] + "22", borderColor: BUILD_CLASS_COLORS[buildClass] }]}>
+              <Text style={[styles.buildTagText, { color: BUILD_CLASS_COLORS[buildClass] }]}>
+                {buildClass}
+              </Text>
+            </View>
+          </View>
+
           {itemDetail.description && (
             <>
               <Divider />
@@ -184,11 +332,20 @@ export default function LoadoutScreen() {
             <>
               <Divider />
               <Text style={styles.subHeading}>Stats</Text>
-              {Object.entries(stats).map(([key, val]) =>
-                val != null ? (
-                  <StatBar key={key} label={key} value={val} maxValue={100} />
-                ) : null
-              )}
+              {Object.entries(stats).map(([key, val]) => {
+                if (val == null) return null;
+                const quality = getStatQuality(val);
+                return (
+                  <View key={key} style={styles.statBarRow}>
+                    <View style={styles.statBarFlex}>
+                      <StatBar label={key} value={val} maxValue={100} color={quality.color} />
+                    </View>
+                    <Text style={[styles.statQualityLabel, { color: quality.color }]}>
+                      {quality.label}
+                    </Text>
+                  </View>
+                );
+              })}
             </>
           )}
         </Panel>
@@ -225,48 +382,149 @@ export default function LoadoutScreen() {
     );
   };
 
-  const renderItemCompare = () => (
-    <>
-      <BackHeader title="Items" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Item Comparison</Text>
-      {compareItems.length < 2 ? (
+  // ══════════════════════════════════════════════════════════════
+  //  ITEM COMPARE
+  // ══════════════════════════════════════════════════════════════
+  const renderItemCompare = () => {
+    // Gather the two compared items
+    const comparedItems = compareItems
+      .slice(0, 2)
+      .map((id: string) => items.find((it) => it.id === id))
+      .filter(Boolean) as MetaForgeItem[];
+
+    // Compute winner based on total stat advantage
+    let winnerIndex: number | null = null;
+    if (comparedItems.length === 2) {
+      const statsA = comparedItems[0].stat_block ?? {};
+      const statsB = comparedItems[1].stat_block ?? {};
+      const allKeys = new Set([...Object.keys(statsA), ...Object.keys(statsB)]);
+      let advA = 0;
+      let advB = 0;
+      allKeys.forEach((k) => {
+        const va = statsA[k] ?? 0;
+        const vb = statsB[k] ?? 0;
+        if (va > vb) advA++;
+        else if (vb > va) advB++;
+      });
+      if (advA > advB) winnerIndex = 0;
+      else if (advB > advA) winnerIndex = 1;
+    }
+
+    return (
+      <>
+        <BackHeader title="Items" onBack={goBack} />
+        <Text style={styles.sectionTitle}>Item Comparison</Text>
+
+        {/* Item selector from browse list */}
         <Panel>
-          <Text style={styles.hintText}>
-            Select a second item to compare. Go back to browse items.
-          </Text>
-        </Panel>
-      ) : (
-        <Panel>
-          <View style={styles.compareRow}>
-            {compareItems.slice(0, 2).map((id, i) => {
-              const item = items.find((it) => it.id === id);
-              if (!item) return null;
-              const stats = item.stat_block
-                ? Object.entries(item.stat_block)
-                    .filter(([, v]) => v != null)
-                    .map(([k, v]) => ({ label: k, value: v as number }))
-                : [];
+          <Text style={styles.subHeading}>Select items to compare</Text>
+          {compareItems.length < 2 && (
+            <Text style={styles.hintText}>
+              Tap items below to select up to 2 for comparison.
+            </Text>
+          )}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.comparePickerScroll}>
+            {items.slice(0, 30).map((it) => {
+              const isSelected = compareItems.includes(it.id);
               return (
-                <CompareColumn
-                  key={id}
-                  name={item.name}
-                  stats={stats}
-                  color={i === 0 ? Colors.accent : Colors.amber}
-                />
+                <TouchableOpacity
+                  key={it.id}
+                  style={[styles.comparePickerItem, isSelected && styles.comparePickerItemActive]}
+                  onPress={() => toggleCompareItem(it.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[styles.comparePickerName, isSelected && styles.comparePickerNameActive]}
+                    numberOfLines={1}
+                  >
+                    {it.name}
+                  </Text>
+                  {it.rarity && (
+                    <Text style={[styles.comparePickerRarity, {
+                      color: (rarityColors as Record<string, string>)[it.rarity.toLowerCase()] ?? Colors.textSecondary
+                    }]}>
+                      {it.rarity}
+                    </Text>
+                  )}
+                </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
         </Panel>
-      )}
-    </>
-  );
 
+        {comparedItems.length < 2 ? (
+          <Panel>
+            <Text style={styles.hintText}>
+              Select {2 - comparedItems.length} more item{comparedItems.length === 0 ? "s" : ""} to compare.
+            </Text>
+          </Panel>
+        ) : (
+          <>
+            {/* Winner indicator */}
+            <View style={styles.winnerBar}>
+              {winnerIndex != null ? (
+                <Text style={styles.winnerText}>
+                  Winner: {comparedItems[winnerIndex].name}
+                </Text>
+              ) : (
+                <Text style={styles.winnerTextTie}>Tied</Text>
+              )}
+            </View>
+
+            <Panel>
+              {/* Side-by-side headers */}
+              <View style={styles.compareRow}>
+                {comparedItems.map((it, i) => (
+                  <View key={it.id} style={styles.compareColHeader}>
+                    <Text style={[styles.compareColName, {
+                      color: i === 0 ? Colors.accent : Colors.amber
+                    }]} numberOfLines={2}>
+                      {it.name}
+                    </Text>
+                    {winnerIndex === i && (
+                      <Text style={styles.compareWinnerBadge}>BEST</Text>
+                    )}
+                  </View>
+                ))}
+              </View>
+
+              <Divider />
+
+              {/* Stat-by-stat comparison grid */}
+              {(() => {
+                const statsA = comparedItems[0].stat_block ?? {};
+                const statsB = comparedItems[1].stat_block ?? {};
+                const allKeys = [...new Set([...Object.keys(statsA), ...Object.keys(statsB)])];
+                return allKeys.map((key) => {
+                  const va = statsA[key] ?? 0;
+                  const vb = statsB[key] ?? 0;
+                  const colorA = va > vb ? Colors.green : va < vb ? Colors.red : Colors.text;
+                  const colorB = vb > va ? Colors.green : vb < va ? Colors.red : Colors.text;
+                  return (
+                    <View key={key} style={styles.compareStatRow}>
+                      <Text style={[styles.compareStatValue, { color: colorA }]}>{va}</Text>
+                      <Text style={styles.compareStatLabel}>{key}</Text>
+                      <Text style={[styles.compareStatValue, { color: colorB }]}>{vb}</Text>
+                    </View>
+                  );
+                });
+              })()}
+            </Panel>
+          </>
+        )}
+      </>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════════
+  //  SKILL TREE
+  // ══════════════════════════════════════════════════════════════
   const renderSkillTree = () => (
     <>
       <BackHeader title="Loadout" onBack={goBack} />
       <Text style={styles.sectionTitle}>Skill Tree</Text>
       {skillNodes.length === 0 ? (
-        <EmptyState icon="🧠" title="No skill data" hint="Pull to refresh" />
+        <EmptyState icon="?" title="No skill data" hint="Pull to refresh" />
       ) : (
         (() => {
           const categories = [...new Set(skillNodes.map((n) => n.category || "General"))];
@@ -290,7 +548,7 @@ export default function LoadoutScreen() {
                         <View style={styles.skillRow}>
                           <View style={styles.skillInfo}>
                             <Text style={styles.skillName}>
-                              {node.isMajor ? "★ " : ""}{loc(node.name)}
+                              {node.isMajor ? "* " : ""}{loc(node.name)}
                             </Text>
                             <Text style={styles.skillAlloc}>{allocated}/{max}</Text>
                           </View>
@@ -335,7 +593,7 @@ export default function LoadoutScreen() {
         <BackHeader title="Skills" onBack={goBack} />
         <Panel>
           <Text style={styles.detailTitle}>
-            {node.isMajor ? "★ " : ""}{loc(node.name)}
+            {node.isMajor ? "* " : ""}{loc(node.name)}
           </Text>
           <Text style={styles.detailSubtitle}>{node.category ?? "General"}</Text>
 
@@ -366,6 +624,9 @@ export default function LoadoutScreen() {
     );
   };
 
+  // ══════════════════════════════════════════════════════════════
+  //  DAMAGE SIM
+  // ══════════════════════════════════════════════════════════════
   const renderDamageSim = () => (
     <>
       <BackHeader title="Loadout" onBack={goBack} />
@@ -426,12 +687,15 @@ export default function LoadoutScreen() {
     </>
   );
 
+  // ══════════════════════════════════════════════════════════════
+  //  ADVISOR
+  // ══════════════════════════════════════════════════════════════
   const renderAdvisor = () => (
     <>
       <BackHeader title="Items" onBack={goBack} />
       <Text style={styles.sectionTitle}>Keep / Sell / Recycle</Text>
       {!advisorResult ? (
-        <EmptyState icon="🤔" title="No advisor result" hint="Select an item and run advisor" />
+        <EmptyState icon="?" title="No advisor result" hint="Select an item and run advisor" />
       ) : (
         <Panel variant={advisorResult.verdict === "keep" ? "glow" : "default"}>
           <Text style={[styles.verdictText, {
@@ -462,7 +726,7 @@ export default function LoadoutScreen() {
               <Text style={styles.subHeading}>Recycle Yields</Text>
               {advisorResult.recycleYields.map((y, i) => (
                 <Text key={i} style={styles.yieldText}>
-                  {y.itemName} ×{y.quantity} (~{y.estimatedValue} value)
+                  {y.itemName} x{y.quantity} (~{y.estimatedValue} value)
                 </Text>
               ))}
             </>
@@ -482,6 +746,9 @@ export default function LoadoutScreen() {
     </>
   );
 
+  // ══════════════════════════════════════════════════════════════
+  //  RISK SCORE
+  // ══════════════════════════════════════════════════════════════
   const renderRiskScore = () => (
     <>
       <BackHeader title="Loadout" onBack={goBack} />
@@ -527,6 +794,9 @@ export default function LoadoutScreen() {
     </>
   );
 
+  // ══════════════════════════════════════════════════════════════
+  //  RAID LOG
+  // ══════════════════════════════════════════════════════════════
   const renderRaidLog = () => {
     const totalRaids = raidEntries.length;
     const extractions = raidEntries.filter((r) => r.outcome === "extracted").length;
@@ -554,13 +824,13 @@ export default function LoadoutScreen() {
 
         {raidEntries.length === 0 ? (
           <EmptyState
-            icon="📊"
+            icon="?"
             title="No raids logged"
             hint="Log your raids to build personal stats"
           />
         ) : (
           <>
-            <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Recent Raids</Text>
+            <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Recent Raids</Text>
             {raidEntries.slice(0, 20).map((entry) => (
               <Panel key={entry.id} style={styles.raidCard}>
                 <View style={styles.raidRow}>
@@ -610,6 +880,9 @@ export default function LoadoutScreen() {
     );
   };
 
+  // ══════════════════════════════════════════════════════════════
+  //  MAIN RENDER
+  // ══════════════════════════════════════════════════════════════
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <Text style={styles.header}>Loadout</Text>
@@ -640,90 +913,290 @@ export default function LoadoutScreen() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  STYLES
+// ═══════════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
   header: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "700",
     color: Colors.text,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxs,
   },
   scroll: { flex: 1 },
-  scrollContent: { padding: 12, paddingBottom: 20 },
-  sectionTitle: { fontSize: 14, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, marginTop: 6 },
-  subHeading: { fontSize: 12, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 },
-  quickNav: { flexDirection: "row", gap: 8, marginTop: 8, marginBottom: 6 },
-  quickNavButton: { flex: 1, alignItems: "center", backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, paddingVertical: 10 },
-  quickNavIcon: { fontSize: 18, marginBottom: 2 },
-  quickNavLabel: { fontSize: 9, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4 },
-  listPad: { paddingTop: 8 },
-  detailTitle: { fontSize: 18, fontWeight: "700", color: Colors.text },
-  detailSubtitle: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
-  detailGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  scrollContent: { padding: spacing.md, paddingBottom: spacing.xl },
+  sectionTitle: { fontSize: fs.md, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: spacing.sm, marginTop: spacing.xs },
+  subHeading: { fontSize: fs.sm, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: spacing.xs },
+
+  // ─── KPI gap ─────────────────────────────────────────────────
+  kpiGap: { height: spacing.sm },
+
+  // ─── Equipment slot grid ─────────────────────────────────────
+  slotGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  slotCell: {
+    width: "31%",
+    flexGrow: 1,
+    flexBasis: "30%",
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 6,
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  slotCellActive: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.accentBg,
+  },
+  slotIcon: {
+    fontSize: fs.lg,
+    fontWeight: "700",
+    color: Colors.textSecondary,
+    marginBottom: spacing.xxs,
+  },
+  slotIconActive: {
+    color: Colors.accent,
+  },
+  slotLabel: {
+    fontSize: fs.xs,
+    fontWeight: "700",
+    color: Colors.textSecondary,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  slotLabelActive: {
+    color: Colors.accent,
+  },
+
+  // ─── Quick nav ───────────────────────────────────────────────
+  quickNav: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.sm, marginBottom: spacing.xs },
+  quickNavButton: { flex: 1, alignItems: "center", backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingVertical: spacing.sm },
+  quickNavIcon: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent, marginBottom: spacing.xxs },
+  quickNavLabel: { fontSize: 8, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4 },
+
+  // ─── Item list ───────────────────────────────────────────────
+  listPad: { paddingTop: spacing.sm },
+  rowAlt: { backgroundColor: Colors.rowAlt, borderRadius: 6 },
+
+  // ─── Item detail ─────────────────────────────────────────────
+  detailTitle: { fontSize: 17, fontWeight: "700", color: Colors.text },
+  detailSubtitle: { fontSize: fs.md, color: Colors.textSecondary, marginTop: spacing.xxs },
+  detailGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   detailCell: { minWidth: "40%" },
-  detailLabel: { fontSize: 10, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
-  detailValue: { fontSize: 15, fontWeight: "700", color: Colors.text, marginTop: 2 },
-  metaRow: { flexDirection: "row", gap: 10, marginTop: 6 },
-  rarityBadge: { fontSize: 12, fontWeight: "700" },
-  typeBadge: { fontSize: 12, color: Colors.textSecondary },
-  valueBadge: { fontSize: 12, color: Colors.accent },
-  descText: { fontSize: 13, color: Colors.text, lineHeight: 18 },
-  actionRow: { flexDirection: "row", gap: 8, marginTop: 8 },
-  actionButton: { flex: 1, backgroundColor: "rgba(0, 180, 216, 0.15)", borderWidth: 1, borderColor: Colors.accent, borderRadius: 8, padding: 10, alignItems: "center" },
-  actionButtonText: { fontSize: 13, fontWeight: "700", color: Colors.accent },
+  detailLabel: { fontSize: fs.xs, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
+  detailValue: { fontSize: fs.lg, fontWeight: "700", color: Colors.text, marginTop: spacing.xxs },
+  metaRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
+  rarityBadge: { fontSize: fs.md, fontWeight: "700" },
+  typeBadge: { fontSize: fs.md, color: Colors.textSecondary },
+  valueBadge: { fontSize: fs.md, color: Colors.accent },
+  descText: { fontSize: fs.md, color: Colors.text, lineHeight: 18 },
+
+  // ─── Build classification tag ────────────────────────────────
+  buildTagRow: {
+    flexDirection: "row",
+    marginTop: spacing.sm,
+  },
+  buildTag: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  buildTagText: {
+    fontSize: fs.xs,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+
+  // ─── Stat bar with quality label ─────────────────────────────
+  statBarRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  statBarFlex: {
+    flex: 1,
+  },
+  statQualityLabel: {
+    fontSize: fs.xs,
+    fontWeight: "700",
+    width: 56,
+    textAlign: "right",
+  },
+
+  // ─── Actions ─────────────────────────────────────────────────
+  actionRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
+  actionButton: { flex: 1, backgroundColor: Colors.accentBg, borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: spacing.sm, alignItems: "center" },
+  actionButtonText: { fontSize: fs.md, fontWeight: "700", color: Colors.accent },
+
+  // ─── Compare ─────────────────────────────────────────────────
   compareRow: { flexDirection: "row" },
-  hintText: { fontSize: 13, color: Colors.textMuted, textAlign: "center", paddingVertical: 8 },
-  categoryTitle: { fontSize: 13, fontWeight: "700", color: Colors.accent, marginTop: 8, marginBottom: 4 },
-  skillCard: { marginBottom: 8 },
+  comparePickerScroll: { marginTop: spacing.xs, marginBottom: spacing.xs },
+  comparePickerItem: {
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginRight: spacing.xs,
+    minWidth: 80,
+    alignItems: "center",
+  },
+  comparePickerItemActive: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.accentBg,
+  },
+  comparePickerName: {
+    fontSize: fs.xs,
+    fontWeight: "600",
+    color: Colors.textSecondary,
+  },
+  comparePickerNameActive: {
+    color: Colors.accent,
+  },
+  comparePickerRarity: {
+    fontSize: 8,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  winnerBar: {
+    backgroundColor: Colors.accentBg,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    borderRadius: 6,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    marginVertical: spacing.xs,
+    alignItems: "center",
+  },
+  winnerText: {
+    fontSize: fs.md,
+    fontWeight: "700",
+    color: Colors.green,
+  },
+  winnerTextTie: {
+    fontSize: fs.md,
+    fontWeight: "700",
+    color: Colors.amber,
+  },
+  compareColHeader: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: spacing.xs,
+  },
+  compareColName: {
+    fontSize: fs.md,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  compareWinnerBadge: {
+    fontSize: 8,
+    fontWeight: "700",
+    color: Colors.green,
+    backgroundColor: "rgba(45, 155, 78, 0.15)",
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 1,
+    borderRadius: 3,
+    marginTop: spacing.xxs,
+    overflow: "hidden",
+  },
+  compareStatRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  compareStatLabel: {
+    fontSize: fs.xs,
+    fontWeight: "700",
+    color: Colors.textSecondary,
+    textTransform: "uppercase",
+    textAlign: "center",
+    flex: 1,
+  },
+  compareStatValue: {
+    fontSize: fs.md,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+    width: 50,
+    textAlign: "center",
+  },
+  hintText: { fontSize: fs.md, color: Colors.textMuted, textAlign: "center", paddingVertical: spacing.sm },
+
+  // ─── Skill tree ──────────────────────────────────────────────
+  categoryTitle: { fontSize: fs.md, fontWeight: "700", color: Colors.accent, marginTop: spacing.sm, marginBottom: spacing.xs },
+  skillCard: { marginBottom: spacing.sm },
   skillCardMajor: { borderColor: Colors.accent },
-  skillRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  skillRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.xs },
   skillInfo: { flex: 1 },
-  skillName: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  skillAlloc: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  skillActions: { flexDirection: "row", gap: 8 },
-  skillBtn: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: Colors.borderAccent, alignItems: "center", justifyContent: "center" },
+  skillName: { fontSize: fs.lg, fontWeight: "600", color: Colors.text },
+  skillAlloc: { fontSize: fs.sm, color: Colors.textSecondary, marginTop: spacing.xxs },
+  skillActions: { flexDirection: "row", gap: spacing.sm },
+  skillBtn: { width: 26, height: 26, borderRadius: 13, borderWidth: 1, borderColor: Colors.borderAccent, alignItems: "center", justifyContent: "center" },
   skillBtnText: { fontSize: 16, fontWeight: "700", color: Colors.accent },
-  prereqText: { fontSize: 13, color: Colors.text, marginBottom: 4, lineHeight: 18 },
-  simInputRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  simLabel: { fontSize: 13, color: Colors.textSecondary },
-  simInputBox: { backgroundColor: Colors.input, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingHorizontal: 16, paddingVertical: 6 },
-  simInputText: { fontSize: 14, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.text },
-  simButton: { backgroundColor: "rgba(0, 180, 216, 0.15)", borderWidth: 1, borderColor: Colors.accent, borderRadius: 8, padding: 10, alignItems: "center", marginTop: 8 },
-  simButtonText: { fontSize: 14, fontWeight: "700", color: Colors.accent },
-  resultCard: { marginTop: 8 },
+  prereqText: { fontSize: fs.md, color: Colors.text, marginBottom: spacing.xs, lineHeight: 18 },
+
+  // ─── Damage sim ──────────────────────────────────────────────
+  simInputRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  simLabel: { fontSize: fs.md, color: Colors.textSecondary },
+  simInputBox: { backgroundColor: Colors.input, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingHorizontal: 16, paddingVertical: spacing.sm },
+  simInputText: { fontSize: fs.lg, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.text },
+  simButton: { backgroundColor: Colors.accentBg, borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: spacing.sm, alignItems: "center", marginTop: spacing.sm },
+  simButtonText: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent },
+  resultCard: { marginTop: spacing.sm },
   resultGrid: { flexDirection: "row", flexWrap: "wrap" },
-  resultCell: { width: "50%", alignItems: "center", paddingVertical: 8 },
-  resultValue: { fontSize: 20, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.accent },
-  resultLabel: { fontSize: 10, fontWeight: "600", color: Colors.textSecondary, textTransform: "uppercase", marginTop: 2 },
+  resultCell: { width: "50%", alignItems: "center", paddingVertical: spacing.sm },
+  resultValue: { fontSize: fs.xl, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.accent },
+  resultLabel: { fontSize: fs.xs, fontWeight: "600", color: Colors.textSecondary, textTransform: "uppercase", marginTop: spacing.xxs },
+
+  // ─── Advisor ─────────────────────────────────────────────────
   verdictText: { fontSize: 24, fontWeight: "700", textAlign: "center" },
-  reasoningText: { fontSize: 13, color: Colors.text, textAlign: "center", marginTop: 8, lineHeight: 18 },
+  reasoningText: { fontSize: fs.md, color: Colors.text, textAlign: "center", marginTop: spacing.sm, lineHeight: 18 },
   advisorCompare: { flexDirection: "row" },
-  advisorCol: { flex: 1, alignItems: "center", paddingVertical: 8 },
-  advisorColTitle: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase" },
-  advisorColValue: { fontSize: 16, fontWeight: "700", color: Colors.text, marginTop: 4 },
-  yieldText: { fontSize: 13, color: Colors.text, marginBottom: 4 },
-  riskPanel: { marginTop: 8 },
-  riskCenter: { alignItems: "center", paddingVertical: 8 },
-  factorRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  factorLabel: { fontSize: 13, color: Colors.text },
-  factorImpact: { fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"] },
-  recommendText: { fontSize: 13, color: Colors.accent, textAlign: "center", fontWeight: "600" },
-  addButton: { backgroundColor: "rgba(0, 180, 216, 0.15)", borderWidth: 1, borderColor: Colors.accent, borderRadius: 8, padding: 10, alignItems: "center", marginTop: 8, marginBottom: 6 },
-  addButtonText: { fontSize: 14, fontWeight: "700", color: Colors.accent },
-  raidCard: { marginBottom: 8 },
+  advisorCol: { flex: 1, alignItems: "center", paddingVertical: spacing.sm },
+  advisorColTitle: { fontSize: fs.sm, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase" },
+  advisorColValue: { fontSize: 16, fontWeight: "700", color: Colors.text, marginTop: spacing.xs },
+  yieldText: { fontSize: fs.md, color: Colors.text, marginBottom: spacing.xs },
+
+  // ─── Risk score ──────────────────────────────────────────────
+  riskPanel: { marginTop: spacing.sm },
+  riskCenter: { alignItems: "center", paddingVertical: spacing.sm },
+  factorRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  factorLabel: { fontSize: fs.md, color: Colors.text },
+  factorImpact: { fontSize: fs.md, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  recommendText: { fontSize: fs.md, color: Colors.accent, textAlign: "center", fontWeight: "600" },
+
+  // ─── Raid log ────────────────────────────────────────────────
+  addButton: { backgroundColor: Colors.accentBg, borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: spacing.sm, alignItems: "center", marginTop: spacing.sm, marginBottom: spacing.sm },
+  addButtonText: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent },
+  raidCard: { marginBottom: spacing.sm },
   raidRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   raidInfo: { flex: 1 },
-  raidMap: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  raidDate: { fontSize: 11, color: Colors.textSecondary, marginTop: 2 },
-  raidOutcome: { fontSize: 12, fontWeight: "700" },
-  raidLoot: { fontSize: 11, color: Colors.accent, marginTop: 4 },
-  statCard: { marginBottom: 8 },
-  statLoadout: { fontSize: 13, fontWeight: "600", color: Colors.text, marginBottom: 4 },
-  statRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 6 },
-  statText: { fontSize: 12, color: Colors.textSecondary },
-  statLoot: { fontSize: 12, color: Colors.accent },
-  errorPanel: { marginBottom: 10, borderColor: Colors.red },
-  errorText: { fontSize: 13, color: Colors.red, textAlign: "center" },
+  raidMap: { fontSize: fs.lg, fontWeight: "600", color: Colors.text },
+  raidDate: { fontSize: fs.sm, color: Colors.textSecondary, marginTop: spacing.xxs },
+  raidOutcome: { fontSize: fs.md, fontWeight: "700" },
+  raidLoot: { fontSize: fs.sm, color: Colors.accent, marginTop: spacing.xs },
+  statCard: { marginBottom: spacing.sm },
+  statLoadout: { fontSize: fs.md, fontWeight: "600", color: Colors.text, marginBottom: spacing.xs },
+  statRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.sm },
+  statText: { fontSize: fs.md, color: Colors.textSecondary },
+  statLoot: { fontSize: fs.md, color: Colors.accent },
+
+  // ─── Error ───────────────────────────────────────────────────
+  errorPanel: { marginBottom: spacing.md, borderColor: Colors.red },
+  errorText: { fontSize: fs.md, color: Colors.red, textAlign: "center" },
 });

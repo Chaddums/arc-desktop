@@ -62,9 +62,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.card,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 6,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    marginBottom: 4,
   },
   cardCompleted: {
     opacity: 0.6,
@@ -72,14 +73,14 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
   },
   checkbox: {
-    width: 22,
-    height: 22,
+    width: 20,
+    height: 20,
     borderRadius: 4,
     borderWidth: 2,
     borderColor: Colors.borderAccent,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 10,
+    marginRight: 8,
   },
   checkboxChecked: {
     backgroundColor: Colors.green,
@@ -94,7 +95,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
     color: Colors.text,
   },
@@ -104,8 +105,8 @@ const styles = StyleSheet.create({
   },
   meta: {
     flexDirection: "row",
-    gap: 8,
-    marginTop: 4,
+    gap: 6,
+    marginTop: 2,
   },
   trader: {
     fontSize: 11,
@@ -117,8 +118,8 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   chevron: {
-    fontSize: 20,
+    fontSize: 18,
     color: Colors.textMuted,
-    marginLeft: 8,
+    marginLeft: 6,
   },
 });

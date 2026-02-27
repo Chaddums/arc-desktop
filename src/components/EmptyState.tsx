@@ -28,22 +28,22 @@ export default function EmptyState({ icon, title, hint }: EmptyStateProps) {
 const styles = StyleSheet.create({
   container: {
     alignItems: "center",
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   icon: {
-    fontSize: 32,
-    marginBottom: 6,
+    fontSize: 28,
+    marginBottom: 4,
   },
   title: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "600",
     color: Colors.textSecondary,
     textAlign: "center",
   },
   hint: {
-    fontSize: 12,
+    fontSize: 11,
     color: Colors.textMuted,
     textAlign: "center",
-    marginTop: 4,
+    marginTop: 3,
   },
 });

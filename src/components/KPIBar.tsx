@@ -4,7 +4,7 @@
 
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { Colors } from "../theme";
+import { Colors, spacing, fontSize as fs, fonts } from "../theme";
 import type { KPICell } from "../types";
 
 interface KPIBarProps {
@@ -35,30 +35,30 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.card,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 8,
+    borderRadius: 6,
     overflow: "hidden",
   },
   cell: {
     flex: 1,
     alignItems: "center",
-    paddingVertical: 8,
+    paddingVertical: spacing.sm,
   },
   cellBorder: {
     borderRightWidth: 1,
     borderRightColor: Colors.border,
   },
   value: {
-    fontSize: 18,
+    fontSize: fs.xl,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
     color: Colors.accent,
   },
   label: {
-    fontSize: 10,
-    fontWeight: "600",
+    fontSize: fs.xs,
+    fontWeight: "700",
     color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    marginTop: 2,
+    marginTop: 1,
   },
 });

@@ -20,11 +20,14 @@ import {
   BackHeader,
   EmptyState,
   ProgressBar,
+  Toggle,
 } from "../components";
 import { useSettings } from "../hooks/useSettings";
 import { useAlertSettings } from "../hooks/useAlertSettings";
 import { useOCRSettings } from "../hooks/useOCRSettings";
+import { useTheme } from "../hooks/useTheme";
 import { clearAllCaches } from "../services/metaforge";
+import { exportSettings, importSettings } from "../utils/settingsIO";
 import type { MoreViewMode, SquadMember } from "../types";
 import { useState, useCallback } from "react";
 
@@ -52,6 +55,8 @@ export default function MoreScreen() {
   const { settings: ocrSettings, update: updateOCRSettings } = useOCRSettings();
   const isDesktop = typeof window !== "undefined" && !!window.arcDesktop;
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const { theme, preset, setTheme, setColorPreset } = useTheme();
 
   const [viewMode, setViewMode] = useState<MoreViewMode>("menu");
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
@@ -227,33 +232,71 @@ export default function MoreScreen() {
         </Text>
       </Panel>
 
+      <Divider />
+
+      <Text style={styles.sectionTitle}>Theme</Text>
+      <Panel>
+        <View style={styles.volumeRow}>
+          {[
+            { label: "Clean", value: "clean" as const },
+            { label: "Tactical", value: "tactical" as const },
+          ].map((opt) => (
+            <TouchableOpacity
+              key={opt.value}
+              style={[styles.volumePill, theme === opt.value && styles.volumePillActive]}
+              onPress={() => setTheme(opt.value)}
+            >
+              <Text style={[styles.volumeText, theme === opt.value && styles.volumeTextActive]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </Panel>
+
+      <Divider />
+
+      <Text style={styles.sectionTitle}>Color Preset</Text>
+      <Panel>
+        <View style={styles.volumeRow}>
+          {[
+            { label: "Default", value: "default" as const },
+            { label: "Colorblind", value: "colorblind" as const },
+            { label: "High Contrast", value: "highContrast" as const },
+          ].map((opt) => (
+            <TouchableOpacity
+              key={opt.value}
+              style={[styles.volumePill, preset === opt.value && styles.volumePillActive]}
+              onPress={() => setColorPreset(opt.value)}
+            >
+              <Text style={[styles.volumeText, preset === opt.value && styles.volumeTextActive]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={styles.langHint}>
+          Adjusts green/red indicators for accessibility
+        </Text>
+      </Panel>
+
       {isDesktop && (
         <>
           <Divider />
 
           <Text style={styles.sectionTitle}>Notifications</Text>
           <Panel>
-            <TouchableOpacity
-              style={styles.toggleRow}
-              onPress={() => updateAlertSettings({ notifyOnEvent: !alertSettings.notifyOnEvent })}
-            >
+            <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>Event Notifications</Text>
-              <Text style={[styles.toggleValue, alertSettings.notifyOnEvent && styles.toggleOn]}>
-                {alertSettings.notifyOnEvent ? "ON" : "OFF"}
-              </Text>
-            </TouchableOpacity>
+              <Toggle value={alertSettings.notifyOnEvent} onToggle={() => updateAlertSettings({ notifyOnEvent: !alertSettings.notifyOnEvent })} size="small" />
+            </View>
 
             <Divider />
 
-            <TouchableOpacity
-              style={styles.toggleRow}
-              onPress={() => updateAlertSettings({ audioAlerts: !alertSettings.audioAlerts })}
-            >
+            <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>Audio Alerts</Text>
-              <Text style={[styles.toggleValue, alertSettings.audioAlerts && styles.toggleOn]}>
-                {alertSettings.audioAlerts ? "ON" : "OFF"}
-              </Text>
-            </TouchableOpacity>
+              <Toggle value={alertSettings.audioAlerts} onToggle={() => updateAlertSettings({ audioAlerts: !alertSettings.audioAlerts })} size="small" />
+            </View>
 
             {alertSettings.audioAlerts && (
               <>
@@ -288,15 +331,10 @@ export default function MoreScreen() {
 
           <Text style={styles.sectionTitle}>Quest Auto-Tracker</Text>
           <Panel>
-            <TouchableOpacity
-              style={styles.toggleRow}
-              onPress={() => updateOCRSettings({ enabled: !ocrSettings.enabled })}
-            >
+            <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>Auto-Track</Text>
-              <Text style={[styles.toggleValue, ocrSettings.enabled && styles.toggleOn]}>
-                {ocrSettings.enabled ? "ON" : "OFF"}
-              </Text>
-            </TouchableOpacity>
+              <Toggle value={ocrSettings.enabled} onToggle={() => updateOCRSettings({ enabled: !ocrSettings.enabled })} size="small" />
+            </View>
 
             {ocrSettings.enabled && (
               <>
@@ -366,21 +404,19 @@ export default function MoreScreen() {
                 ].map((zone) => {
                   const active = ocrSettings.activeZones.includes(zone.id);
                   return (
-                    <TouchableOpacity
-                      key={zone.id}
-                      style={styles.toggleRow}
-                      onPress={() => {
-                        const zones = active
-                          ? ocrSettings.activeZones.filter((z) => z !== zone.id)
-                          : [...ocrSettings.activeZones, zone.id];
-                        updateOCRSettings({ activeZones: zones });
-                      }}
-                    >
+                    <View key={zone.id} style={styles.toggleRow}>
                       <Text style={styles.zoneLabel}>{zone.label}</Text>
-                      <Text style={[styles.toggleValue, active && styles.toggleOn]}>
-                        {active ? "ON" : "OFF"}
-                      </Text>
-                    </TouchableOpacity>
+                      <Toggle
+                        value={active}
+                        onToggle={() => {
+                          const zones = active
+                            ? ocrSettings.activeZones.filter((z) => z !== zone.id)
+                            : [...ocrSettings.activeZones, zone.id];
+                          updateOCRSettings({ activeZones: zones });
+                        }}
+                        size="small"
+                      />
+                    </View>
                   );
                 })}
 
@@ -411,6 +447,30 @@ export default function MoreScreen() {
         </>
       )}
 
+      {isDesktop && (
+        <>
+          <Divider />
+          <Text style={styles.sectionTitle}>Window Size</Text>
+          <Panel>
+            <View style={styles.volumeRow}>
+              {[
+                { label: "Default", preset: "default" as const },
+                { label: "Large", preset: "large" as const },
+                { label: "XL", preset: "xl" as const },
+              ].map((opt) => (
+                <TouchableOpacity
+                  key={opt.preset}
+                  style={styles.volumePill}
+                  onPress={() => window.arcDesktop?.windowSetSize(opt.preset)}
+                >
+                  <Text style={styles.volumeText}>{opt.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Panel>
+        </>
+      )}
+
       <Divider />
 
       <Text style={styles.sectionTitle}>Data</Text>
@@ -420,6 +480,54 @@ export default function MoreScreen() {
           <Text style={styles.cacheHint}>Forces fresh data on next load (15-min TTL)</Text>
         </Panel>
       </TouchableOpacity>
+
+      <Divider />
+
+      <Text style={styles.sectionTitle}>Settings Backup</Text>
+      <Panel>
+        <TouchableOpacity
+          style={styles.testButton}
+          onPress={async () => {
+            try {
+              const json = await exportSettings();
+              if (typeof navigator !== "undefined" && navigator.clipboard) {
+                await navigator.clipboard.writeText(json);
+                setExportStatus("Copied to clipboard!");
+              } else {
+                setExportStatus("Export ready (check console)");
+                console.log(json);
+              }
+            } catch (e) {
+              setExportStatus("Export failed");
+            }
+            setTimeout(() => setExportStatus(null), 3000);
+          }}
+        >
+          <Text style={styles.testButtonText}>Export to Clipboard</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.testButton, { marginTop: 6 }]}
+          onPress={async () => {
+            try {
+              if (typeof navigator !== "undefined" && navigator.clipboard) {
+                const json = await navigator.clipboard.readText();
+                const count = await importSettings(json);
+                setExportStatus(`Imported ${count} settings — reload to apply`);
+              } else {
+                setExportStatus("Clipboard not available");
+              }
+            } catch {
+              setExportStatus("Invalid settings data");
+            }
+            setTimeout(() => setExportStatus(null), 4000);
+          }}
+        >
+          <Text style={styles.testButtonText}>Import from Clipboard</Text>
+        </TouchableOpacity>
+        {exportStatus && (
+          <Text style={styles.testResultText}>{exportStatus}</Text>
+        )}
+      </Panel>
 
       {__DEV__ && (
         <>
@@ -493,20 +601,20 @@ export default function MoreScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
   header: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "700",
     color: Colors.text,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingHorizontal: 14,
+    paddingTop: 6,
+    paddingBottom: 2,
   },
   scroll: { flex: 1 },
-  scrollContent: { padding: 12, paddingBottom: 20 },
-  sectionTitle: { fontSize: 14, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
-  subHeading: { fontSize: 12, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 6 },
-  menuItem: { marginBottom: 6 },
+  scrollContent: { padding: 10, paddingBottom: 16 },
+  sectionTitle: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 },
+  subHeading: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 },
+  menuItem: { marginBottom: 4 },
   menuRow: { flexDirection: "row", alignItems: "center" },
-  menuIcon: { fontSize: 20, marginRight: 10 },
+  menuIcon: { fontSize: 18, marginRight: 8 },
   menuLabel: { flex: 1, fontSize: 16, fontWeight: "600", color: Colors.text },
   chevron: { fontSize: 24, color: Colors.textMuted },
   detailTitle: { fontSize: 18, fontWeight: "700", color: Colors.text },
@@ -516,7 +624,7 @@ const styles = StyleSheet.create({
   squadCodeLabel: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
   squadCode: { fontSize: 24, fontWeight: "700", color: Colors.accent, marginTop: 4, textAlign: "center", letterSpacing: 4 },
   squadHint: { fontSize: 12, color: Colors.textMuted, textAlign: "center", marginTop: 4, marginBottom: 8 },
-  squadButton: { backgroundColor: "rgba(0, 180, 216, 0.15)", borderWidth: 1, borderColor: Colors.accent, borderRadius: 8, padding: 10, alignItems: "center", marginBottom: 6 },
+  squadButton: { backgroundColor: "rgba(0, 180, 216, 0.15)", borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: 8, alignItems: "center", marginBottom: 6 },
   squadButtonSecondary: { backgroundColor: "transparent", borderColor: Colors.border },
   squadButtonText: { fontSize: 14, fontWeight: "700", color: Colors.accent },
   squadButtonTextSecondary: { fontSize: 14, fontWeight: "700", color: Colors.textSecondary },
@@ -530,8 +638,8 @@ const styles = StyleSheet.create({
   memberRole: { fontSize: 11, fontWeight: "700", color: Colors.accent, marginRight: 8 },
   memberDetailHeader: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
   roleText: { fontSize: 15, fontWeight: "600", color: Colors.accent },
-  langGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  langPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, borderWidth: 1, borderColor: Colors.border },
+  langGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  langPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
   langPillActive: { borderColor: Colors.accent, backgroundColor: "rgba(0, 180, 216, 0.15)" },
   langText: { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
   langTextActive: { color: Colors.accent },
@@ -552,13 +660,13 @@ const styles = StyleSheet.create({
   toggleValue: { fontSize: 13, fontWeight: "700", color: Colors.textMuted },
   toggleOn: { color: Colors.accent },
   volumeLabel: { fontSize: 11, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5, marginTop: 4, marginBottom: 6 },
-  volumeRow: { flexDirection: "row", gap: 8 },
-  volumePill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, borderWidth: 1, borderColor: Colors.border },
+  volumeRow: { flexDirection: "row", gap: 6 },
+  volumePill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: Colors.border },
   volumePillActive: { borderColor: Colors.accent, backgroundColor: "rgba(0, 180, 216, 0.15)" },
   volumeText: { fontSize: 12, fontWeight: "600", color: Colors.textSecondary },
   volumeTextActive: { color: Colors.accent },
   zoneLabel: { fontSize: 13, fontWeight: "500", color: Colors.text },
-  testButton: { backgroundColor: "rgba(0, 180, 216, 0.12)", borderWidth: 1, borderColor: Colors.borderAccent, borderRadius: 8, padding: 10, alignItems: "center", marginTop: 4 },
+  testButton: { backgroundColor: "rgba(0, 180, 216, 0.12)", borderWidth: 1, borderColor: Colors.borderAccent, borderRadius: 6, padding: 8, alignItems: "center", marginTop: 4 },
   testButtonText: { fontSize: 13, fontWeight: "700", color: Colors.accent },
   testResultText: { fontSize: 11, color: Colors.textSecondary, marginTop: 6, fontFamily: "monospace" },
 });

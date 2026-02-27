@@ -6,7 +6,7 @@
 
 import React from "react";
 import { View, ViewStyle, StyleSheet } from "react-native";
-import { Colors } from "../theme";
+import { Colors, spacing } from "../theme";
 
 interface PanelProps {
   children: React.ReactNode;
@@ -48,8 +48,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.card,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 8,
-    padding: 12,
+    borderRadius: 6,
+    padding: spacing.md,
     position: "relative",
   },
   elevated: {

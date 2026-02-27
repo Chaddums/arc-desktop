@@ -14,6 +14,13 @@ contextBridge.exposeInMainWorld("arcDesktop", {
   /** Get current mode ("main" | "overlay") */
   getMode: () => ipcRenderer.invoke("get-mode"),
 
+  // ─── Window Controls (frameless title bar) ──────────────────
+  windowMinimize: () => ipcRenderer.send("window-minimize"),
+  windowMaximize: () => ipcRenderer.send("window-maximize"),
+  windowClose: () => ipcRenderer.send("window-close"),
+  windowIsMaximized: () => ipcRenderer.invoke("window-is-maximized"),
+  windowSetSize: (preset) => ipcRenderer.send("window-set-size", preset),
+
   /** Listen for mode changes */
   onModeChange: (cb) => {
     const handler = (_event, mode) => cb(mode);

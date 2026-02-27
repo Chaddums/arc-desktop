@@ -1,6 +1,13 @@
 /**
  * MissionsScreen — Tab 4: Quest tracker, hideout/station planner, shopping list, daily optimizer.
  * Absorbs QuestsScreen + CraftingScreen.
+ *
+ * P1 Upgrades:
+ *  1. Quest chain progress visualization (vertical connector bar, green/pending, progress %)
+ *  2. Shopping list KPIBar (unique materials, total qty, est. cost) + prominent MaterialRow
+ *  3. Daily optimizer priority sorting + priority badges + estimated effort
+ *  4. Trader list KPIBar (total quests, completed, completion %)
+ *  5. Striped rows on quest chains and station tiers
  */
 
 import React, { useMemo } from "react";
@@ -13,7 +20,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Colors } from "../theme";
+import { Colors, spacing, fontSize as fs, threatColors } from "../theme";
 import {
   Panel,
   Divider,
@@ -22,6 +29,8 @@ import {
   BackHeader,
   EmptyState,
   ProgressBar,
+  KPIBar,
+  StatusBadge,
 } from "../components";
 import { useMissions } from "../hooks/useMissions";
 import { useCompletedQuests } from "../hooks/useCompletedQuests";
@@ -41,6 +50,19 @@ const STATION_ICONS: Record<string, string> = {
   stash: "\uD83D\uDCE6",
   utility_bench: "\uD83D\uDD28",
   workbench: "\uD83E\uDE9B",
+};
+
+/** Priority mapping for daily optimizer sorting. */
+const PRIORITY_ORDER: Record<string, number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+};
+
+const PRIORITY_COLORS: Record<string, string> = {
+  high: Colors.red,
+  medium: Colors.amber,
+  low: Colors.green,
 };
 
 export default function MissionsScreen() {
@@ -79,10 +101,65 @@ export default function MissionsScreen() {
   const { completedIds, markComplete, markIncomplete } = useCompletedQuests();
   const { addItem: addToChecklist } = useLoadoutChecklist();
 
+  // ── P1-4: Trader list KPI aggregates ──────────────────────────
+
+  const traderKpi = useMemo(() => {
+    let totalQuests = 0;
+    let totalCompleted = 0;
+    TRADERS.forEach((trader) => {
+      const quests = questsByTrader[trader] || [];
+      totalQuests += quests.length;
+      totalCompleted += quests.filter((q) => completedIds.has(q.id)).length;
+    });
+    const pct = totalQuests > 0 ? Math.round((totalCompleted / totalQuests) * 100) : 0;
+    return { totalQuests, totalCompleted, pct };
+  }, [questsByTrader, completedIds]);
+
+  // ── P1-1: Quest chain progress percentage ─────────────────────
+
+  const chainProgress = useMemo(() => {
+    if (questChain.length === 0) return 0;
+    const done = questChain.filter((q) => completedIds.has(q.id)).length;
+    return Math.round((done / questChain.length) * 100);
+  }, [questChain, completedIds]);
+
+  // ── P1-2: Shopping list KPI aggregates ────────────────────────
+
+  const shoppingKpi = useMemo(() => {
+    const uniqueMats = shoppingList.length;
+    const totalQty = shoppingList.reduce((s, m) => s + m.quantity, 0);
+    // Estimated cost: sum (quantity * estimated unit value) — fall back to 0 if no value
+    const estCost = shoppingList.reduce(
+      (s, m) => s + m.quantity * ((m as any).estimatedUnitValue ?? 0),
+      0,
+    );
+    return { uniqueMats, totalQty, estCost };
+  }, [shoppingList]);
+
+  // ── P1-3: Sorted daily recommendations ────────────────────────
+
+  const sortedRecommendations = useMemo(() => {
+    return [...dailyRecommendations].sort((a, b) => {
+      const pa = PRIORITY_ORDER[(a as any).priority ?? "low"] ?? 2;
+      const pb = PRIORITY_ORDER[(b as any).priority ?? "low"] ?? 2;
+      return pa - pb;
+    });
+  }, [dailyRecommendations]);
+
+  // ── View Renderers ────────────────────────────────────────────
+
   const renderTraderList = () => (
     <>
-      {/* Quests Section */}
-      <Text style={styles.sectionTitle}>Quest Chains</Text>
+      {/* P1-4: KPIBar at top of trader list */}
+      <KPIBar
+        cells={[
+          { label: "Total Quests", value: String(traderKpi.totalQuests) },
+          { label: "Completed", value: String(traderKpi.totalCompleted), color: Colors.green },
+          { label: "Progress", value: `${traderKpi.pct}%`, color: Colors.accent },
+        ]}
+      />
+
+      <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Quest Chains</Text>
       {TRADERS.map((trader) => {
         const quests = questsByTrader[trader] || [];
         const completed = quests.filter((q) => completedIds.has(q.id)).length;
@@ -117,44 +194,105 @@ export default function MissionsScreen() {
           style={styles.quickNavButton}
           onPress={() => setViewMode("hideoutOverview")}
         >
-          <Text style={styles.quickNavIcon}>🏗</Text>
+          <Text style={styles.quickNavIcon}>{"\uD83C\uDFD7"}</Text>
           <Text style={styles.quickNavLabel}>Hideout</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.quickNavButton}
           onPress={() => setViewMode("dailyOptimizer")}
         >
-          <Text style={styles.quickNavIcon}>📋</Text>
+          <Text style={styles.quickNavIcon}>{"\uD83D\uDCCB"}</Text>
           <Text style={styles.quickNavLabel}>Daily Plan</Text>
         </TouchableOpacity>
       </View>
     </>
   );
 
+  // ── P1-1: Quest chain with connected vertical bar + progress badge ─
+
   const renderQuestChain = () => (
     <>
       <BackHeader title="Traders" onBack={goBack} />
-      <Text style={styles.sectionTitle}>{selectedTrader}</Text>
+
+      {/* Header row: trader name + progress badge */}
+      <View style={styles.chainHeaderRow}>
+        <Text style={styles.sectionTitle}>{selectedTrader}</Text>
+        {questChain.length > 0 && (
+          <View style={styles.progressBadge}>
+            <Text style={styles.progressBadgeText}>{chainProgress}%</Text>
+          </View>
+        )}
+      </View>
+
+      {questChain.length > 0 && (
+        <ProgressBar
+          progress={chainProgress / 100}
+          color={chainProgress === 100 ? Colors.green : Colors.accent}
+          height={4}
+        />
+      )}
+
+      <View style={styles.chainSpacer} />
+
       {questChain.length === 0 ? (
         <EmptyState title="No quests found for this trader" />
       ) : (
-        questChain.map((quest) => (
-          <View key={quest.id}>
-            <View style={styles.chainConnector} />
-            <QuestCard
-              name={loc(quest.name) || quest.id}
-              trader={selectedTrader ?? undefined}
-              xp={quest.xp}
-              isCompleted={completedIds.has(quest.id)}
-              onToggle={() =>
-                completedIds.has(quest.id)
-                  ? markIncomplete(quest.id)
-                  : markComplete(quest.id)
-              }
-              onPress={() => goToQuest(quest.id)}
-            />
-          </View>
-        ))
+        questChain.map((quest, idx) => {
+          const isDone = completedIds.has(quest.id);
+          const isLast = idx === questChain.length - 1;
+          const connectorColor = isDone ? Colors.green : Colors.border;
+
+          return (
+            <View
+              key={quest.id}
+              style={[
+                styles.chainNodeWrap,
+                // P1-5: Striped rows on quest chain
+                idx % 2 === 1 && styles.rowAlt,
+              ]}
+            >
+              {/* P1-1: Vertical connector line on left */}
+              <View style={styles.connectorColumn}>
+                {/* Top segment (not rendered for first item) */}
+                <View
+                  style={[
+                    styles.connectorSegment,
+                    { backgroundColor: idx === 0 ? "transparent" : connectorColor },
+                  ]}
+                />
+                {/* Node dot */}
+                <View
+                  style={[
+                    styles.connectorDot,
+                    { backgroundColor: isDone ? Colors.green : Colors.borderAccent },
+                    isDone && styles.connectorDotDone,
+                  ]}
+                />
+                {/* Bottom segment (not rendered for last item) */}
+                <View
+                  style={[
+                    styles.connectorSegment,
+                    { backgroundColor: isLast ? "transparent" : connectorColor },
+                  ]}
+                />
+              </View>
+
+              {/* Quest card */}
+              <View style={styles.chainCardWrap}>
+                <QuestCard
+                  name={loc(quest.name) || quest.id}
+                  trader={selectedTrader ?? undefined}
+                  xp={quest.xp}
+                  isCompleted={isDone}
+                  onToggle={() =>
+                    isDone ? markIncomplete(quest.id) : markComplete(quest.id)
+                  }
+                  onPress={() => goToQuest(quest.id)}
+                />
+              </View>
+            </View>
+          );
+        })
       )}
     </>
   );
@@ -198,7 +336,7 @@ export default function MissionsScreen() {
             activeOpacity={0.7}
           >
             <Panel style={styles.stationPanel}>
-              <Text style={styles.stationIcon}>{STATION_ICONS[station.id] || "🏗"}</Text>
+              <Text style={styles.stationIcon}>{STATION_ICONS[station.id] || "\uD83C\uDFD7"}</Text>
               <Text style={styles.stationName} numberOfLines={2}>
                 {loc(station.name) || station.id}
               </Text>
@@ -223,6 +361,8 @@ export default function MissionsScreen() {
     </>
   );
 
+  // ── P1-5: Station detail with striped tier rows ───────────────
+
   const renderStationDetail = () => {
     if (!selectedStation) return null;
     const station = stations.find((s) => s.id === selectedStation);
@@ -233,7 +373,7 @@ export default function MissionsScreen() {
         <BackHeader title="Hideout" onBack={goBack} />
         <Text style={styles.sectionTitle}>{loc(station.name) || station.id}</Text>
 
-        {(station.levels || []).map((level) => {
+        {(station.levels || []).map((level, idx) => {
           const isSelected = selectedCrafts.some(
             (c) => c.stationId === station.id && c.targetLevel >= level.level
           );
@@ -243,7 +383,13 @@ export default function MissionsScreen() {
               onPress={() => goToLevel(station.id, level.level)}
               activeOpacity={0.7}
             >
-              <Panel style={isSelected ? { ...styles.tierCard, borderColor: Colors.accent } : styles.tierCard}>
+              <Panel
+                style={{
+                  ...styles.tierCard,
+                  ...(isSelected ? { borderColor: Colors.accent } : undefined),
+                  ...(idx % 2 === 1 ? styles.rowAlt : undefined),
+                }}
+              >
                 <View style={styles.tierHeader}>
                   <Text style={styles.tierTitle}>Tier {level.level}</Text>
                   <TouchableOpacity
@@ -260,7 +406,7 @@ export default function MissionsScreen() {
                 </View>
                 {level.requirements.map((req, i) => (
                   <Text key={i} style={styles.reqText}>
-                    {req.itemName ?? req.itemId} × {req.quantity}
+                    {req.itemName ?? req.itemId} \u00D7 {req.quantity}
                   </Text>
                 ))}
               </Panel>
@@ -271,19 +417,46 @@ export default function MissionsScreen() {
     );
   };
 
+  // ── P1-2: Shopping list with KPIBar + prominent rows ──────────
+
   const renderShoppingList = () => (
     <>
       <BackHeader title="Hideout" onBack={goBack} />
       <Text style={styles.sectionTitle}>Shopping List</Text>
+
       {shoppingList.length === 0 ? (
         <EmptyState title="Select station tiers to build a shopping list" />
       ) : (
         <>
+          {/* P1-2: KPIBar at top of shopping list */}
+          <KPIBar
+            cells={[
+              { label: "Materials", value: String(shoppingKpi.uniqueMats) },
+              { label: "Total Qty", value: String(shoppingKpi.totalQty), color: Colors.accent },
+              {
+                label: "Est. Cost",
+                value: shoppingKpi.estCost > 0 ? shoppingKpi.estCost.toLocaleString() : "--",
+                color: shoppingKpi.estCost > 0 ? Colors.amber : undefined,
+              },
+            ]}
+          />
+
+          <View style={styles.shoppingListSpacer} />
+
           <Panel>
-            {shoppingList.map((mat) => (
-              <MaterialRow key={mat.itemId} material={mat} />
+            {shoppingList.map((mat, idx) => (
+              <View
+                key={mat.itemId}
+                style={[
+                  styles.shoppingMatWrap,
+                  idx % 2 === 1 && styles.rowAlt,
+                ]}
+              >
+                <MaterialRow material={mat} />
+              </View>
             ))}
           </Panel>
+
           {typeof window !== "undefined" && window.arcDesktop && (
             <TouchableOpacity
               style={styles.shoppingButton}
@@ -301,6 +474,8 @@ export default function MissionsScreen() {
     </>
   );
 
+  // ── P1-3: Daily optimizer with priority sorting + badges ──────
+
   const renderDailyOptimizer = () => (
     <>
       <BackHeader title="Missions" onBack={goBack} />
@@ -312,19 +487,37 @@ export default function MissionsScreen() {
         </Text>
       </Panel>
 
-      {dailyRecommendations.length === 0 ? (
+      {sortedRecommendations.length === 0 ? (
         <EmptyState
-          icon="📋"
+          icon="\uD83D\uDCCB"
           title="No recommendations yet"
           hint="Complete some quests and log raids to get personalized suggestions"
         />
       ) : (
-        dailyRecommendations.map((rec, i) => (
-          <Panel key={i} style={styles.card}>
-            <Text style={styles.recTitle}>{rec.title}</Text>
-            <Text style={styles.recReason}>{rec.reason}</Text>
-          </Panel>
-        ))
+        sortedRecommendations.map((rec, i) => {
+          const priority: string = (rec as any).priority ?? "low";
+          const effort: string | undefined = (rec as any).estimatedEffort;
+          const priorityColor = PRIORITY_COLORS[priority] ?? Colors.textSecondary;
+
+          return (
+            <Panel key={i} style={styles.card}>
+              <View style={styles.recHeaderRow}>
+                <Text style={styles.recTitle}>{rec.title}</Text>
+                {/* P1-3: Priority badge */}
+                <View style={[styles.priorityBadge, { borderColor: priorityColor }]}>
+                  <Text style={[styles.priorityText, { color: priorityColor }]}>
+                    {priority.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.recReason}>{rec.reason}</Text>
+              {/* P1-3: Estimated effort */}
+              {effort && (
+                <Text style={styles.recEffort}>{effort}</Text>
+              )}
+            </Panel>
+          );
+        })
       )}
 
       {activeEvents.length > 0 && (
@@ -373,74 +566,141 @@ export default function MissionsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
   header: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "700",
     color: Colors.text,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xxs,
   },
   scroll: { flex: 1 },
-  scrollContent: { padding: 12, paddingBottom: 20 },
+  scrollContent: { padding: spacing.md, paddingBottom: spacing.xl },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: fs.md,
     fontWeight: "700",
     color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 1,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
-  card: { marginBottom: 8 },
-  traderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+
+  // ── Trader List ────────────────────────────────────────────────
+  card: { marginBottom: spacing.sm },
+  traderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.xs,
+  },
   traderInfo: { flex: 1 },
-  traderName: { fontSize: 16, fontWeight: "700", color: Colors.text },
-  traderCount: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
+  traderName: { fontSize: fs.lg, fontWeight: "700", color: Colors.text },
+  traderCount: { fontSize: 12, color: Colors.textSecondary, marginTop: spacing.xxs },
   chevron: { fontSize: 24, color: Colors.textMuted },
-  quickNav: { flexDirection: "row", gap: 8, marginTop: 6 },
+
+  // ── Quick Nav ──────────────────────────────────────────────────
+  quickNav: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
   quickNavButton: {
     flex: 1,
     alignItems: "center",
     backgroundColor: Colors.card,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 8,
-    paddingVertical: 10,
+    borderRadius: 6,
+    paddingVertical: 8,
   },
-  quickNavIcon: { fontSize: 20, marginBottom: 2 },
+  quickNavIcon: { fontSize: 16, marginBottom: spacing.xxs },
   quickNavLabel: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: "700",
     color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  chainConnector: {
-    width: 2,
-    height: 8,
-    backgroundColor: Colors.borderAccent,
-    alignSelf: "center",
-    marginVertical: -2,
+
+  // ── Quest Chain (P1-1 connected visualization) ────────────────
+  chainHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.xs,
   },
-  questTitle: { fontSize: 18, fontWeight: "700", color: Colors.text },
-  questXp: { fontSize: 13, color: Colors.accent, marginTop: 4 },
+  progressBadge: {
+    backgroundColor: Colors.accentBg,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    borderRadius: 10,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  progressBadgeText: {
+    fontSize: fs.sm,
+    fontWeight: "700",
+    color: Colors.accent,
+    fontVariant: ["tabular-nums"],
+  },
+  chainSpacer: { height: spacing.sm },
+  chainNodeWrap: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    minHeight: 54,
+  },
+  connectorColumn: {
+    width: 24,
+    alignItems: "center",
+    marginRight: spacing.xs,
+  },
+  connectorSegment: {
+    flex: 1,
+    width: 3,
+    borderRadius: 1.5,
+  },
+  connectorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: Colors.borderAccent,
+  },
+  connectorDotDone: {
+    borderColor: Colors.green,
+  },
+  chainCardWrap: {
+    flex: 1,
+  },
+  rowAlt: {
+    backgroundColor: Colors.rowAlt,
+  },
+
+  // ── Quest Detail ───────────────────────────────────────────────
+  questTitle: { fontSize: fs.xl, fontWeight: "700", color: Colors.text },
+  questXp: { fontSize: fs.md, color: Colors.accent, marginTop: spacing.xs },
   subHeading: {
-    fontSize: 12,
+    fontSize: fs.sm,
     fontWeight: "700",
     color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.8,
-    marginBottom: 6,
+    marginBottom: spacing.xs,
   },
-  objectiveText: { fontSize: 13, color: Colors.text, marginBottom: 4, lineHeight: 18 },
-  stationGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  stationCell: { width: "31%", minWidth: 100 },
-  stationPanel: { alignItems: "center", paddingVertical: 10 },
-  stationIcon: { fontSize: 24, marginBottom: 4 },
-  stationName: { fontSize: 11, fontWeight: "600", color: Colors.text, textAlign: "center" },
-  stationLevels: { fontSize: 10, color: Colors.textSecondary, marginTop: 2 },
-  tierCard: { marginBottom: 8 },
-  tierHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
-  tierTitle: { fontSize: 15, fontWeight: "700", color: Colors.text },
+  objectiveText: { fontSize: 12, color: Colors.text, marginBottom: 3, lineHeight: 18 },
+
+  // ── Hideout Grid ───────────────────────────────────────────────
+  stationGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  stationCell: { width: "31%", minWidth: 90 },
+  stationPanel: { alignItems: "center", paddingVertical: 8 },
+  stationIcon: { fontSize: 20, marginBottom: 3 },
+  stationName: { fontSize: fs.sm, fontWeight: "600", color: Colors.text, textAlign: "center" },
+  stationLevels: { fontSize: fs.xs, color: Colors.textSecondary, marginTop: spacing.xxs },
+
+  // ── Station Detail / Tiers ─────────────────────────────────────
+  tierCard: { marginBottom: spacing.sm },
+  tierHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.xs,
+  },
+  tierTitle: { fontSize: fs.lg, fontWeight: "700", color: Colors.text },
   selectButton: {
     width: 28,
     height: 28,
@@ -453,22 +713,59 @@ const styles = StyleSheet.create({
   selectButtonActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   selectText: { fontSize: 16, fontWeight: "700", color: Colors.textSecondary },
   selectTextActive: { color: "#fff" },
-  reqText: { fontSize: 13, color: Colors.textSecondary, marginTop: 2 },
+  reqText: { fontSize: fs.md, color: Colors.textSecondary, marginTop: spacing.xxs },
+
+  // ── Shopping List (P1-2) ───────────────────────────────────────
+  shoppingListSpacer: { height: spacing.sm },
+  shoppingMatWrap: {
+    borderRadius: 4,
+    overflow: "hidden",
+  },
   shoppingButton: {
     backgroundColor: "rgba(0, 180, 216, 0.15)",
     borderWidth: 1,
     borderColor: Colors.accent,
-    borderRadius: 8,
-    padding: 10,
+    borderRadius: 6,
+    padding: 8,
     alignItems: "center",
+    marginTop: spacing.sm,
   },
-  shoppingButtonText: { fontSize: 14, fontWeight: "700", color: Colors.accent },
+  shoppingButtonText: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent },
+
+  // ── Daily Optimizer (P1-3) ─────────────────────────────────────
   optimizerTitle: { fontSize: 16, fontWeight: "700", color: Colors.accent },
-  optimizerHint: { fontSize: 12, color: Colors.textSecondary, marginTop: 4 },
-  recTitle: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  recReason: { fontSize: 12, color: Colors.textSecondary, marginTop: 4, lineHeight: 16 },
-  eventName: { fontSize: 15, fontWeight: "600", color: Colors.text },
-  eventMap: { fontSize: 12, color: Colors.accent, marginTop: 2 },
-  errorPanel: { marginBottom: 10, borderColor: Colors.red },
-  errorText: { fontSize: 13, color: Colors.red, textAlign: "center" },
+  optimizerHint: { fontSize: 12, color: Colors.textSecondary, marginTop: spacing.xs },
+  recHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  recTitle: { fontSize: fs.lg, fontWeight: "600", color: Colors.text, flex: 1 },
+  recReason: { fontSize: 12, color: Colors.textSecondary, marginTop: spacing.xs, lineHeight: 16 },
+  recEffort: {
+    fontSize: fs.xs,
+    fontWeight: "600",
+    color: Colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  priorityBadge: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+  },
+  priorityText: {
+    fontSize: fs.xs,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+
+  // ── Events (daily optimizer section) ───────────────────────────
+  eventName: { fontSize: fs.lg, fontWeight: "600", color: Colors.text },
+  eventMap: { fontSize: 12, color: Colors.accent, marginTop: spacing.xxs },
+
+  // ── Error ──────────────────────────────────────────────────────
+  errorPanel: { marginBottom: spacing.md, borderColor: Colors.red },
+  errorText: { fontSize: fs.md, color: Colors.red, textAlign: "center" },
 });

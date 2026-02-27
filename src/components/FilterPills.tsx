@@ -55,17 +55,16 @@ export default function FilterPills({
 
 const styles = StyleSheet.create({
   row: {
-    maxHeight: 44,
+    maxHeight: 36,
   },
   content: {
-    paddingHorizontal: 12,
-    gap: 8,
+    gap: 6,
     alignItems: "center",
   },
   pill: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: Colors.card,

@@ -1,8 +1,10 @@
 /**
  * MarketScreen — Tab 3: Trader inventory, price history, crafting profit, watchlist.
+ * P1 upgrades: % change on prices, category pills on inventory, striped rows,
+ * status badges on watchlist, improved KPI cards.
  */
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -12,7 +14,7 @@ import {
   StyleSheet,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Colors, rarityColors } from "../theme";
+import { Colors, spacing, fontSize as fs } from "../theme";
 import {
   Panel,
   Divider,
@@ -22,12 +24,17 @@ import {
   ItemRow,
   KPIBar,
   Sparkline,
+  FilterPills,
+  StatusBadge,
 } from "../components";
 import { useMarket } from "../hooks/useMarket";
 import type { MarketViewMode } from "../types";
 
+const INVENTORY_CATEGORIES = ["Weapon", "Armor", "Consumable", "Material", "Ammo"];
+
 export default function MarketScreen() {
   const insets = useSafeAreaInsets();
+  const [inventoryCategory, setInventoryCategory] = useState<string | null>(null);
   const {
     viewMode,
     setViewMode,
@@ -55,8 +62,20 @@ export default function MarketScreen() {
     refresh,
   } = useMarket();
 
+  // Total items across all traders
+  const totalItems = useMemo(() => traders.reduce((sum, t) => sum + t.inventory.length, 0), [traders]);
+
   const renderTraderList = () => (
     <>
+      {/* KPI summary */}
+      <KPIBar
+        cells={[
+          { label: "Traders", value: String(traders.length) },
+          { label: "Total Items", value: String(totalItems) },
+          { label: "Watching", value: String(watchlist.length), color: watchlist.length > 0 ? Colors.accent : undefined },
+        ]}
+      />
+
       {/* Quick nav */}
       <View style={styles.quickNav}>
         {[
@@ -75,7 +94,7 @@ export default function MarketScreen() {
         ))}
       </View>
 
-      <Text style={[styles.sectionTitle, { marginTop: 10 }]}>Traders</Text>
+      <Text style={styles.sectionTitle}>Traders</Text>
       {traders.length === 0 ? (
         <EmptyState icon="🏪" title="No trader data" hint="Pull to refresh" />
       ) : (
@@ -84,6 +103,7 @@ export default function MarketScreen() {
             key={trader.id}
             onPress={() => {
               setSelectedTrader(trader.id);
+              setInventoryCategory(null);
               setViewMode("traderInventory");
             }}
             activeOpacity={0.7}
@@ -109,11 +129,17 @@ export default function MarketScreen() {
     const trader = traders.find((t) => t.id === selectedTrader);
     if (!trader) return <EmptyState title="Trader not found" />;
 
-    const filtered = traderSearch
-      ? trader.inventory.filter((item) =>
-          item.name.toLowerCase().includes(traderSearch.toLowerCase())
-        )
-      : trader.inventory;
+    let filtered = trader.inventory;
+    if (inventoryCategory) {
+      filtered = filtered.filter((item) =>
+        item.item_type?.toLowerCase().includes(inventoryCategory.toLowerCase())
+      );
+    }
+    if (traderSearch) {
+      filtered = filtered.filter((item) =>
+        item.name.toLowerCase().includes(traderSearch.toLowerCase())
+      );
+    }
 
     return (
       <>
@@ -124,22 +150,30 @@ export default function MarketScreen() {
           onChangeText={setTraderSearch}
           placeholder={`Search ${trader.name}'s inventory...`}
         />
+        <FilterPills
+          options={INVENTORY_CATEGORIES}
+          selected={inventoryCategory}
+          onSelect={setInventoryCategory}
+          allLabel="All"
+        />
+        <Text style={styles.resultCount}>{filtered.length} items</Text>
         <View style={styles.listPad}>
           {filtered.length === 0 ? (
             <EmptyState title="No items found" />
           ) : (
-            filtered.map((item) => (
-              <ItemRow
-                key={item.id}
-                name={item.name}
-                subtitle={item.item_type}
-                rarity={item.rarity}
-                rightText={item.trader_price != null ? `${item.trader_price}` : undefined}
-                onPress={() => {
-                  setSelectedPriceItem(item.id);
-                  setViewMode("itemPriceDetail");
-                }}
-              />
+            filtered.map((item, i) => (
+              <View key={item.id} style={i % 2 === 1 ? styles.rowAlt : undefined}>
+                <ItemRow
+                  name={item.name}
+                  subtitle={item.item_type}
+                  rarity={item.rarity}
+                  rightText={item.trader_price != null ? `${item.trader_price}` : undefined}
+                  onPress={() => {
+                    setSelectedPriceItem(item.id);
+                    setViewMode("itemPriceDetail");
+                  }}
+                />
+              </View>
             ))
           )}
         </View>
@@ -147,29 +181,41 @@ export default function MarketScreen() {
     );
   };
 
-  const renderPriceHistory = () => (
-    <>
-      <BackHeader title="Market" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Price History</Text>
-      {priceHistory.length === 0 ? (
-        <EmptyState
-          icon="📈"
-          title="No price data yet"
-          hint="Price snapshots are recorded as you browse traders"
-        />
-      ) : (
-        (() => {
-          // Group by itemId
-          const byItem = new Map<string, { name: string; prices: number[] }>();
-          for (const snap of priceHistory) {
-            const existing = byItem.get(snap.itemId);
-            if (existing) {
-              existing.prices.push(snap.value);
-            } else {
-              byItem.set(snap.itemId, { name: snap.itemId, prices: [snap.value] });
-            }
-          }
-          return [...byItem.entries()].map(([itemId, data]) => (
+  const renderPriceHistory = () => {
+    // Group by itemId with % change calculation
+    const byItem = useMemo(() => {
+      const map = new Map<string, { name: string; prices: number[]; pctChange: number | null }>();
+      for (const snap of priceHistory) {
+        const existing = map.get(snap.itemId);
+        if (existing) {
+          existing.prices.push(snap.value);
+        } else {
+          map.set(snap.itemId, { name: snap.itemId, prices: [snap.value], pctChange: null });
+        }
+      }
+      // Calculate % change
+      for (const [, data] of map) {
+        if (data.prices.length >= 2) {
+          const first = data.prices[0];
+          const last = data.prices[data.prices.length - 1];
+          data.pctChange = first > 0 ? ((last - first) / first) * 100 : null;
+        }
+      }
+      return map;
+    }, [priceHistory]);
+
+    return (
+      <>
+        <BackHeader title="Market" onBack={goBack} />
+        <Text style={styles.sectionTitle}>Price History</Text>
+        {priceHistory.length === 0 ? (
+          <EmptyState
+            icon="📈"
+            title="No price data yet"
+            hint="Price snapshots are recorded as you browse traders"
+          />
+        ) : (
+          [...byItem.entries()].map(([itemId, data]) => (
             <TouchableOpacity
               key={itemId}
               onPress={() => {
@@ -181,30 +227,58 @@ export default function MarketScreen() {
                 <View style={styles.priceRow}>
                   <View style={styles.priceInfo}>
                     <Text style={styles.priceName}>{data.name.replace(/_/g, " ")}</Text>
-                    <Text style={styles.priceValue}>
-                      {data.prices[data.prices.length - 1]}
-                    </Text>
+                    <View style={styles.priceMetaRow}>
+                      <Text style={styles.priceValue}>
+                        {data.prices[data.prices.length - 1]}
+                      </Text>
+                      {data.pctChange != null && (
+                        <Text style={[
+                          styles.pctChange,
+                          { color: data.pctChange >= 0 ? Colors.green : Colors.red },
+                        ]}>
+                          {data.pctChange >= 0 ? "+" : ""}{data.pctChange.toFixed(1)}%
+                        </Text>
+                      )}
+                    </View>
                   </View>
-                  <Sparkline data={data.prices} width={80} height={24} />
+                  <Sparkline
+                    data={data.prices}
+                    width={80}
+                    height={24}
+                    color={data.pctChange != null && data.pctChange >= 0 ? Colors.green : Colors.red}
+                  />
                 </View>
               </Panel>
             </TouchableOpacity>
-          ));
-        })()
-      )}
-    </>
-  );
+          ))
+        )}
+      </>
+    );
+  };
 
   const renderItemPriceDetail = () => {
     const snapshots = priceHistory.filter((s) => s.itemId === selectedPriceItem);
     const prices = snapshots.map((s) => s.value);
     const name = selectedPriceItem?.replace(/_/g, " ") ?? "Unknown";
+    const pctChange = prices.length >= 2 && prices[0] > 0
+      ? ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100
+      : null;
 
     return (
       <>
         <BackHeader title="Prices" onBack={goBack} />
         <Panel>
-          <Text style={styles.detailTitle}>{name}</Text>
+          <View style={styles.detailHeader}>
+            <Text style={styles.detailTitle}>{name}</Text>
+            {pctChange != null && (
+              <Text style={[
+                styles.detailPctChange,
+                { color: pctChange >= 0 ? Colors.green : Colors.red },
+              ]}>
+                {pctChange >= 0 ? "+" : ""}{pctChange.toFixed(1)}%
+              </Text>
+            )}
+          </View>
           {prices.length > 0 && (
             <>
               <View style={styles.sparklineContainer}>
@@ -215,6 +289,7 @@ export default function MarketScreen() {
                   { label: "Current", value: String(prices[prices.length - 1]) },
                   { label: "Min", value: String(Math.min(...prices)) },
                   { label: "Max", value: String(Math.max(...prices)) },
+                  { label: "Snapshots", value: String(prices.length) },
                 ]}
               />
             </>
@@ -277,16 +352,23 @@ export default function MarketScreen() {
               </Text>
             </View>
             <View style={styles.profitDetails}>
-              <Text style={styles.profitDetail}>Cost: {profit.totalCost}</Text>
-              <Text style={styles.profitDetail}>Sell: {profit.sellValue}</Text>
-              <Text
-                style={[
-                  styles.profitDetail,
+              <View style={styles.profitCell}>
+                <Text style={styles.profitCellLabel}>Cost</Text>
+                <Text style={styles.profitCellValue}>{profit.totalCost}</Text>
+              </View>
+              <View style={styles.profitCell}>
+                <Text style={styles.profitCellLabel}>Sell</Text>
+                <Text style={styles.profitCellValue}>{profit.sellValue}</Text>
+              </View>
+              <View style={styles.profitCell}>
+                <Text style={styles.profitCellLabel}>Profit</Text>
+                <Text style={[
+                  styles.profitCellValue,
                   { color: profit.profitable ? Colors.green : Colors.red },
-                ]}
-              >
-                Profit: {profit.sellValue - profit.totalCost}
-              </Text>
+                ]}>
+                  {profit.sellValue - profit.totalCost}
+                </Text>
+              </View>
             </View>
           </Panel>
         ))
@@ -308,6 +390,9 @@ export default function MarketScreen() {
         watchlist.map((item) => {
           const prices = watchlistPrices[item.itemId] ?? [];
           const currentPrice = prices.length > 0 ? prices[prices.length - 1] : null;
+          const pctChange = prices.length >= 2 && prices[0] > 0
+            ? ((prices[prices.length - 1] - prices[0]) / prices[0]) * 100
+            : null;
 
           return (
             <TouchableOpacity
@@ -321,9 +406,19 @@ export default function MarketScreen() {
                 <View style={styles.watchRow}>
                   <View style={styles.watchInfo}>
                     <Text style={styles.watchName}>{item.itemName}</Text>
-                    {currentPrice != null && (
-                      <Text style={styles.watchPrice}>{currentPrice} value</Text>
-                    )}
+                    <View style={styles.watchMeta}>
+                      {currentPrice != null && (
+                        <Text style={styles.watchPrice}>{currentPrice} value</Text>
+                      )}
+                      {pctChange != null && (
+                        <Text style={[
+                          styles.watchPct,
+                          { color: pctChange >= 0 ? Colors.green : Colors.red },
+                        ]}>
+                          {pctChange >= 0 ? "▲" : "▼"} {Math.abs(pctChange).toFixed(1)}%
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   {prices.length > 1 && (
                     <Sparkline data={prices} width={60} height={20} />
@@ -374,47 +469,57 @@ export default function MarketScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
   header: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: "700",
     color: Colors.text,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingHorizontal: 14,
+    paddingTop: 6,
+    paddingBottom: 2,
   },
   scroll: { flex: 1 },
-  scrollContent: { padding: 12, paddingBottom: 20 },
-  sectionTitle: { fontSize: 14, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 },
-  quickNav: { flexDirection: "row", gap: 8 },
-  quickNavButton: { flex: 1, alignItems: "center", backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 8, paddingVertical: 10 },
-  quickNavIcon: { fontSize: 20, marginBottom: 2 },
-  quickNavLabel: { fontSize: 10, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
-  card: { marginBottom: 8 },
+  scrollContent: { padding: 10, paddingBottom: 16 },
+  sectionTitle: { fontSize: 13, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, marginTop: 4 },
+  quickNav: { flexDirection: "row", gap: 6, marginTop: 6, marginBottom: 4 },
+  quickNavButton: { flex: 1, alignItems: "center", backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingVertical: 8 },
+  quickNavIcon: { fontSize: 16, marginBottom: 2 },
+  quickNavLabel: { fontSize: 9, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.5 },
+  card: { marginBottom: 6 },
   traderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   traderInfo: { flex: 1 },
-  traderName: { fontSize: 16, fontWeight: "700", color: Colors.text },
-  traderCount: { fontSize: 12, color: Colors.textSecondary, marginTop: 2 },
-  chevron: { fontSize: 24, color: Colors.textMuted },
-  listPad: { paddingTop: 8 },
+  traderName: { fontSize: 15, fontWeight: "700", color: Colors.text },
+  traderCount: { fontSize: 11, color: Colors.textSecondary, marginTop: 1 },
+  chevron: { fontSize: 22, color: Colors.textMuted },
+  listPad: { paddingTop: 4 },
+  rowAlt: { backgroundColor: Colors.rowAlt, borderRadius: 6 },
+  resultCount: { fontSize: 10, color: Colors.textMuted, marginBottom: 4 },
   priceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   priceInfo: { flex: 1 },
-  priceName: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  priceValue: { fontSize: 12, color: Colors.accent, marginTop: 2 },
-  detailTitle: { fontSize: 18, fontWeight: "700", color: Colors.text, marginBottom: 8 },
-  sparklineContainer: { alignItems: "center", paddingVertical: 10 },
-  hintText: { fontSize: 13, color: Colors.textMuted, textAlign: "center", paddingVertical: 8 },
-  watchlistButton: { backgroundColor: "rgba(0, 180, 216, 0.15)", borderWidth: 1, borderColor: Colors.accent, borderRadius: 8, padding: 10, alignItems: "center", marginTop: 8 },
-  watchlistButtonText: { fontSize: 14, fontWeight: "700", color: Colors.accent },
+  priceName: { fontSize: 13, fontWeight: "600", color: Colors.text },
+  priceMetaRow: { flexDirection: "row", gap: 6, alignItems: "center", marginTop: 2 },
+  priceValue: { fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.accent },
+  pctChange: { fontSize: 10, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  detailHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
+  detailTitle: { fontSize: 17, fontWeight: "700", color: Colors.text },
+  detailPctChange: { fontSize: 14, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  sparklineContainer: { alignItems: "center", paddingVertical: 8 },
+  hintText: { fontSize: 12, color: Colors.textMuted, textAlign: "center", paddingVertical: 6 },
+  watchlistButton: { backgroundColor: Colors.accentBg, borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: 8, alignItems: "center", marginTop: 6 },
+  watchlistButtonText: { fontSize: 13, fontWeight: "700", color: Colors.accent },
   profitRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  profitName: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  profitMargin: { fontSize: 16, fontWeight: "700", fontVariant: ["tabular-nums"] },
-  profitDetails: { flexDirection: "row", gap: 12, marginTop: 6 },
-  profitDetail: { fontSize: 12, color: Colors.textSecondary },
+  profitName: { fontSize: 13, fontWeight: "600", color: Colors.text },
+  profitMargin: { fontSize: 15, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  profitDetails: { flexDirection: "row", gap: 4, marginTop: 6 },
+  profitCell: { flex: 1, alignItems: "center", backgroundColor: Colors.bgDeep, borderRadius: 4, paddingVertical: 4 },
+  profitCellLabel: { fontSize: 9, fontWeight: "700", color: Colors.textMuted, textTransform: "uppercase", letterSpacing: 0.5 },
+  profitCellValue: { fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.text, marginTop: 1 },
   watchRow: { flexDirection: "row", alignItems: "center" },
   watchInfo: { flex: 1 },
-  watchName: { fontSize: 14, fontWeight: "600", color: Colors.text },
-  watchPrice: { fontSize: 12, color: Colors.accent, marginTop: 2 },
-  removeBtn: { marginLeft: 12, padding: 4 },
+  watchName: { fontSize: 13, fontWeight: "600", color: Colors.text },
+  watchMeta: { flexDirection: "row", gap: 6, alignItems: "center", marginTop: 2 },
+  watchPrice: { fontSize: 11, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.accent },
+  watchPct: { fontSize: 10, fontWeight: "700", fontVariant: ["tabular-nums"] },
+  removeBtn: { marginLeft: 10, padding: 4 },
   removeText: { fontSize: 14, color: Colors.textMuted },
-  errorPanel: { marginBottom: 10, borderColor: Colors.red },
-  errorText: { fontSize: 13, color: Colors.red, textAlign: "center" },
+  errorPanel: { marginBottom: 8, borderColor: Colors.red },
+  errorText: { fontSize: 12, color: Colors.red, textAlign: "center" },
 });

@@ -48,10 +48,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.input,
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    height: 40,
-    marginHorizontal: 16,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    height: 34,
     marginBottom: 6,
   },
   icon: {

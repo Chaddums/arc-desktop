@@ -16,6 +16,26 @@ const fs = require("fs");
 
 const DEV = process.argv.includes("--dev");
 const DIST = path.join(__dirname, "..", "dist");
+const GEOMETRY_FILE = path.join(app.getPath("userData"), "window-geometry.json");
+
+// ─── Window Geometry Persistence ─────────────────────────────────
+function loadGeometry() {
+  try {
+    if (fs.existsSync(GEOMETRY_FILE)) {
+      return JSON.parse(fs.readFileSync(GEOMETRY_FILE, "utf8"));
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function saveGeometry(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const bounds = win.getBounds();
+    const isMaximized = win.isMaximized();
+    fs.writeFileSync(GEOMETRY_FILE, JSON.stringify({ ...bounds, isMaximized }));
+  } catch { /* ignore */ }
+}
 
 // ─── State ──────────────────────────────────────────────────────
 let mainWindow = null;
@@ -40,13 +60,19 @@ let ocrSettings = {
 
 // ─── Windows ────────────────────────────────────────────────────
 function createMainWindow(url) {
+  const saved = loadGeometry();
+
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: saved?.width ?? 1200,
+    height: saved?.height ?? 800,
+    x: saved?.x,
+    y: saved?.y,
     minWidth: 380,
     minHeight: 600,
     backgroundColor: "#0a0e12",
     autoHideMenuBar: true,
+    frame: false,
+    titleBarStyle: "hidden",
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -55,11 +81,23 @@ function createMainWindow(url) {
     },
   });
 
+  if (saved?.isMaximized) mainWindow.maximize();
+
   mainWindow.once("ready-to-show", () => {
     if (currentMode === "main") mainWindow.show();
   });
 
+  // Save geometry on move/resize (debounced)
+  let geoTimer = null;
+  const debounceSaveGeo = () => {
+    clearTimeout(geoTimer);
+    geoTimer = setTimeout(() => saveGeometry(mainWindow), 500);
+  };
+  mainWindow.on("move", debounceSaveGeo);
+  mainWindow.on("resize", debounceSaveGeo);
+
   mainWindow.on("close", (e) => {
+    saveGeometry(mainWindow);
     // If tray exists, hide to tray instead of quitting
     if (tray && !app.isQuitting) {
       e.preventDefault();
@@ -195,6 +233,35 @@ function updateTrayMenu() {
 
 // ─── IPC Handlers ───────────────────────────────────────────────
 ipcMain.handle("get-mode", () => currentMode);
+
+// Window controls (frameless title bar)
+ipcMain.on("window-minimize", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize();
+});
+ipcMain.on("window-maximize", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) win.isMaximized() ? win.unmaximize() : win.maximize();
+});
+ipcMain.on("window-close", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close();
+});
+ipcMain.handle("window-is-maximized", (event) => {
+  return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
+});
+
+// Window size presets
+ipcMain.on("window-set-size", (_event, preset) => {
+  if (!mainWindow) return;
+  const sizes = {
+    default: [1200, 800],
+    large: [1440, 900],
+    xl: [1680, 1050],
+  };
+  const [w, h] = sizes[preset] || sizes.default;
+  mainWindow.unmaximize();
+  mainWindow.setSize(w, h);
+  mainWindow.center();
+});
 
 ipcMain.on("set-ignore-mouse-events", (event, ignore, opts) => {
   const win = BrowserWindow.fromWebContents(event.sender);

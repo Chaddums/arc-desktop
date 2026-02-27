@@ -33,27 +33,27 @@ export default function CompareColumn({
 const styles = StyleSheet.create({
   column: {
     flex: 1,
-    padding: 12,
+    padding: 8,
   },
   name: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: "700",
-    marginBottom: 10,
+    marginBottom: 8,
     textAlign: "center",
   },
   statRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 4,
+    paddingVertical: 3,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
   label: {
-    fontSize: 11,
+    fontSize: 10,
     color: Colors.textSecondary,
   },
   value: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
     color: Colors.text,

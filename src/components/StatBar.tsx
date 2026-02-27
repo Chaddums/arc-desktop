@@ -37,34 +37,34 @@ export default function StatBar({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 8,
+    marginBottom: 6,
   },
   labelRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 4,
+    marginBottom: 3,
   },
   label: {
-    fontSize: 11,
-    fontWeight: "600",
+    fontSize: 10,
+    fontWeight: "700",
     color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   value: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
     color: Colors.text,
   },
   track: {
-    height: 6,
+    height: 5,
     backgroundColor: Colors.border,
     borderRadius: 3,
     overflow: "hidden",
   },
   fill: {
-    height: 6,
+    height: 5,
     borderRadius: 3,
   },
 });
