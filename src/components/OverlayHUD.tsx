@@ -19,6 +19,7 @@ import OverlayChecklist from "./OverlayChecklist";
 import OverlayQuestProgress from "./OverlayQuestProgress";
 import OverlaySquadQuests from "./OverlaySquadQuests";
 import OverlayMapIntel from "./OverlayMapIntel";
+import OverlayMapPip from "./OverlayMapPip";
 
 export default function OverlayHUD() {
   const { activeEvents, upcomingEvents, now } = useEventTimer();
@@ -29,6 +30,7 @@ export default function OverlayHUD() {
   const { completionQueue, dismissCompletion } = useAutoQuestTracker(allQuests);
   const { settings: alertSettings } = useAlertSettings();
   const { currentMap } = useMapDetection(maps, bots, activeEvents, allQuests, completedIds);
+  const [pipVisible, setPipVisible] = useState(false);
 
   const nextEvent = upcomingEvents[0];
   const countdown = nextEvent ? nextEvent.startTime - now : null;
@@ -114,7 +116,8 @@ export default function OverlayHUD() {
         onDismiss={dismissCompletion}
         audioVolume={alertSettings.audioVolume}
       />
-      <OverlayMapIntel intel={currentMap} />
+      <OverlayMapPip intel={currentMap} onVisibilityChange={setPipVisible} />
+      <OverlayMapIntel intel={currentMap} collapsed={pipVisible} />
       <OverlayChecklist />
       <OverlaySquadQuests />
     </div>

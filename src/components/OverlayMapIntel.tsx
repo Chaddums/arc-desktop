@@ -3,7 +3,7 @@
  * Displays enemies, relevant quests, loot, and active events.
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import type { MapIntel } from "../hooks/useMapDetection";
 import { Colors } from "../theme";
@@ -17,11 +17,17 @@ const THREAT_COLORS: Record<string, string> = {
 
 interface Props {
   intel: MapIntel | null;
+  collapsed?: boolean;
 }
 
-export default function OverlayMapIntel({ intel }: Props) {
-  const [expanded, setExpanded] = useState(true);
+export default function OverlayMapIntel({ intel, collapsed }: Props) {
+  const [expanded, setExpanded] = useState(!collapsed);
   const [section, setSection] = useState<"enemies" | "quests" | "loot">("enemies");
+
+  // Auto-collapse when pip is showing
+  useEffect(() => {
+    if (collapsed) setExpanded(false);
+  }, [collapsed]);
 
   if (!intel) return null;
 
