@@ -33,7 +33,8 @@ import { Sparkline } from "../components";
 import { useLoadout } from "../hooks/useLoadout";
 import { useBuildAdvisor } from "../hooks/useBuildAdvisor";
 import { loc } from "../utils/loc";
-import type { LoadoutViewMode, MetaForgeItem } from "../types";
+import { formatValue } from "../utils/format";
+import type { LoadoutViewMode, MetaForgeItem, StashVerdict, AdvisorVerdict } from "../types";
 import type { PlaystyleGoal, BuildAdvice } from "../hooks/useBuildAdvisor";
 
 const ITEM_CATEGORIES = ["Weapon", "Armor", "Consumable", "Material", "Key"];
@@ -142,6 +143,11 @@ export default function LoadoutScreen() {
     raidEntries,
     raidStats,
     addRaidEntry,
+    // Stash organizer
+    stashVerdicts,
+    stashLoading,
+    stashStats,
+    refreshStash,
     // Checklist
     addToChecklist,
     // Common
@@ -302,6 +308,17 @@ export default function LoadoutScreen() {
         <Text style={styles.buildAdvisorButtonIcon}>*</Text>
         <Text style={styles.buildAdvisorButtonText}>Build Advisor</Text>
         <Text style={styles.buildAdvisorButtonHint}>Get recommendations for your playstyle</Text>
+      </TouchableOpacity>
+
+      {/* Stash Organizer button */}
+      <TouchableOpacity
+        style={styles.buildAdvisorButton}
+        onPress={() => setViewMode("stashOrganizer")}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.buildAdvisorButtonIcon}>{"\u2726"}</Text>
+        <Text style={styles.buildAdvisorButtonText}>Stash Organizer</Text>
+        <Text style={styles.buildAdvisorButtonHint}>Bulk keep/sell/recycle verdicts for all items</Text>
       </TouchableOpacity>
 
       <View style={styles.listPad}>
@@ -929,6 +946,128 @@ export default function LoadoutScreen() {
   };
 
   // ══════════════════════════════════════════════════════════════
+  //  STASH ORGANIZER
+  // ══════════════════════════════════════════════════════════════
+  const [stashFilter, setStashFilter] = useState<AdvisorVerdict | null>(null);
+  const [stashSearch, setStashSearch] = useState("");
+  const [expandedStashItem, setExpandedStashItem] = useState<string | null>(null);
+
+  const VERDICT_FILTERS: AdvisorVerdict[] = ["keep", "sell", "recycle"];
+
+  const filteredStashVerdicts = useMemo(() => {
+    let list = stashVerdicts;
+    if (stashFilter) {
+      list = list.filter((v) => v.verdict === stashFilter);
+    }
+    if (stashSearch) {
+      const q = stashSearch.toLowerCase();
+      list = list.filter((v) => v.item.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [stashVerdicts, stashFilter, stashSearch]);
+
+  const verdictColor = (v: AdvisorVerdict) =>
+    v === "keep" ? C.verdictKeep : v === "sell" ? C.verdictSell : C.verdictRecycle;
+
+  const renderStashOrganizer = () => (
+    <>
+      <BackHeader title="Loadout" onBack={goBack} />
+      <Text style={styles.sectionTitle}>Stash Organizer</Text>
+
+      <KPIBar
+        cells={[
+          { label: "Keep", value: `${stashStats.keepCount} ITEMS`, color: C.verdictKeep },
+          { label: "Sell", value: `~${formatValue(stashStats.totalSellValue)}`, color: C.verdictSell },
+          { label: "Recycle", value: `~${formatValue(stashStats.totalRecycleValue)}`, color: C.verdictRecycle },
+        ]}
+      />
+
+      <View style={styles.kpiGap} />
+
+      <FilterPills
+        options={VERDICT_FILTERS.map((v) => v.charAt(0).toUpperCase() + v.slice(1))}
+        selected={stashFilter ? stashFilter.charAt(0).toUpperCase() + stashFilter.slice(1) : null}
+        onSelect={(val) => setStashFilter(
+          val ? val.toLowerCase() as AdvisorVerdict : null
+        )}
+        allLabel="All"
+      />
+
+      <SearchBar value={stashSearch} onChangeText={setStashSearch} placeholder="Search items..." />
+
+      <View style={styles.listPad}>
+        {stashLoading && stashVerdicts.length === 0 ? (
+          <EmptyState icon="?" title="Analyzing stash..." hint="Fetching items and computing verdicts" />
+        ) : filteredStashVerdicts.length === 0 ? (
+          <EmptyState icon="?" title="No items found" hint="Try a different filter or search" />
+        ) : (
+          filteredStashVerdicts.map((sv, idx) => {
+            const isExpanded = expandedStashItem === sv.item.id;
+            const subtitle = sv.verdict === "keep"
+              ? `${sv.item.item_type} \u00B7 Used in crafting`
+              : sv.verdict === "recycle"
+              ? `${sv.item.item_type} \u00B7 \u2192 ${sv.recycleYields.map((y) => `${y.quantity}x ${y.itemName}`).join(", ") || "components"}`
+              : `${sv.item.item_type} \u00B7 ${sv.sellValue} value`;
+
+            return (
+              <View key={sv.item.id} style={idx % 2 === 1 ? styles.rowAlt : undefined}>
+                <ItemRow
+                  name={sv.item.name}
+                  subtitle={subtitle}
+                  rarity={sv.item.rarity}
+                  rightText={sv.verdict.toUpperCase()}
+                  rightColor={verdictColor(sv.verdict)}
+                  onPress={() => setExpandedStashItem(isExpanded ? null : sv.item.id)}
+                />
+                {isExpanded && (
+                  <Panel style={styles.stashExpandedPanel}>
+                    <Text style={styles.reasoningText}>{sv.reasoning}</Text>
+
+                    {sv.verdict === "keep" && sv.craftingUses.length > 0 && (
+                      <>
+                        <Text style={[styles.subHeading, { marginTop: spacing.sm }]}>Crafting Uses</Text>
+                        {sv.craftingUses.map((use, i) => (
+                          <Text key={i} style={styles.yieldText}>{"\u2022"} {use}</Text>
+                        ))}
+                      </>
+                    )}
+
+                    {sv.verdict === "recycle" && sv.recycleYields.length > 0 && (
+                      <>
+                        <Text style={[styles.subHeading, { marginTop: spacing.sm }]}>Recycle Yields</Text>
+                        {sv.recycleYields.map((y, i) => (
+                          <Text key={i} style={styles.yieldText}>
+                            {y.itemName} x{y.quantity}
+                          </Text>
+                        ))}
+                      </>
+                    )}
+
+                    {sv.verdict === "sell" && (
+                      <Text style={[styles.yieldText, { marginTop: spacing.xs }]}>
+                        Sell value: {sv.sellValue}
+                      </Text>
+                    )}
+
+                    {typeof window !== "undefined" && window.arcDesktop && (
+                      <TouchableOpacity
+                        style={[styles.actionButton, { marginTop: spacing.sm }]}
+                        onPress={() => addToChecklist(sv.item.name, 1)}
+                      >
+                        <Text style={styles.actionButtonText}>Pin to Overlay</Text>
+                      </TouchableOpacity>
+                    )}
+                  </Panel>
+                )}
+              </View>
+            );
+          })
+        )}
+      </View>
+    </>
+  );
+
+  // ══════════════════════════════════════════════════════════════
   //  BUILD ADVISOR (Phase 5d)
   // ══════════════════════════════════════════════════════════════
   const renderBuildAdvisor = () => (
@@ -1073,6 +1212,7 @@ export default function LoadoutScreen() {
         {viewMode === "riskScore" && renderRiskScore()}
         {viewMode === "raidLog" && renderRaidLog()}
         {viewMode === "buildAdvisor" && renderBuildAdvisor()}
+        {viewMode === "stashOrganizer" && renderStashOrganizer()}
       </ScrollView>
     </View>
   );
@@ -1496,6 +1636,15 @@ const styles = StyleSheet.create({
     color: Colors.accent,
     minWidth: 40,
     textAlign: "right",
+  },
+
+  // ─── Stash Organizer ────────────────────────────────────────
+  stashExpandedPanel: {
+    marginTop: -spacing.xs,
+    marginBottom: spacing.sm,
+    borderTopWidth: 0,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
   },
 
   // ─── Error ───────────────────────────────────────────────────

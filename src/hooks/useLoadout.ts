@@ -8,6 +8,7 @@ import { useItemBrowser } from "./useItemBrowser";
 import { useSkillTree } from "./useSkillTree";
 import { useDamageSim } from "./useDamageSim";
 import { useItemAdvisor } from "./useItemAdvisor";
+import { useStashOrganizer } from "./useStashOrganizer";
 import { useRiskScore } from "./useRiskScore";
 import { useRaidLog } from "./useRaidLog";
 import { useEnemyBrowser } from "./useEnemyBrowser";
@@ -22,6 +23,7 @@ export function useLoadout() {
   const skillTree = useSkillTree();
   const damageSim = useDamageSim();
   const advisor = useItemAdvisor(itemBrowser.items);
+  const stashOrganizer = useStashOrganizer();
   const riskScore = useRiskScore();
   const raidLog = useRaidLog();
   const enemyBrowser = useEnemyBrowser();
@@ -37,6 +39,7 @@ export function useLoadout() {
       case "damageSim":
       case "riskScore":
       case "raidLog":
+      case "stashOrganizer":
         setViewMode("itemBrowser");
         break;
       case "itemCompare":
@@ -117,6 +120,11 @@ export function useLoadout() {
     raidEntries: raidLog.entries,
     raidStats: raidLog.loadoutStats,
     addRaidEntry,
+    // Stash organizer
+    stashVerdicts: stashOrganizer.verdicts,
+    stashLoading: stashOrganizer.loading,
+    stashStats: stashOrganizer.stats,
+    refreshStash: stashOrganizer.refresh,
     // Checklist
     checklistItems: checklist.items,
     addToChecklist: checklist.addItem,

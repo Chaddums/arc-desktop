@@ -20,6 +20,8 @@ import OverlayQuestProgress from "./OverlayQuestProgress";
 import OverlaySquadQuests from "./OverlaySquadQuests";
 import OverlayMapIntel from "./OverlayMapIntel";
 import OverlayMapPip from "./OverlayMapPip";
+import OverlayStashPip from "./OverlayStashPip";
+import { useStashOrganizer } from "../hooks/useStashOrganizer";
 
 export default function OverlayHUD() {
   const { activeEvents, upcomingEvents, now } = useEventTimer();
@@ -31,6 +33,7 @@ export default function OverlayHUD() {
   const { settings: alertSettings } = useAlertSettings();
   const { currentMap } = useMapDetection(maps, bots, activeEvents, allQuests, completedIds);
   const [pipVisible, setPipVisible] = useState(false);
+  const stashOrganizer = useStashOrganizer();
 
   const nextEvent = upcomingEvents[0];
   const countdown = nextEvent ? nextEvent.startTime - now : null;
@@ -117,6 +120,11 @@ export default function OverlayHUD() {
         audioVolume={alertSettings.audioVolume}
       />
       <OverlayMapPip intel={currentMap} onVisibilityChange={setPipVisible} />
+      <OverlayStashPip
+        verdicts={stashOrganizer.verdicts}
+        stats={stashOrganizer.stats}
+        loading={stashOrganizer.loading}
+      />
       <OverlayMapIntel intel={currentMap} collapsed={pipVisible} />
       <OverlayChecklist />
       <OverlaySquadQuests />

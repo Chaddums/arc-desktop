@@ -204,7 +204,8 @@ export type LoadoutViewMode =
   | "advisor"
   | "riskScore"
   | "raidLog"
-  | "buildAdvisor";
+  | "buildAdvisor"
+  | "stashOrganizer";
 
 export type MarketViewMode =
   | "traderList"
@@ -286,6 +287,18 @@ export interface AdvisorResult {
   totalRecycleValue: number;
   reasoning: string;
   craftingUses: string[];
+}
+
+// ─── Stash Organizer ────────────────────────────────────────────
+
+export interface StashVerdict {
+  item: MetaForgeItem;
+  verdict: AdvisorVerdict;
+  reasoning: string;
+  sellValue: number;
+  recycleValue: number;
+  craftingUses: string[];
+  recycleYields: { itemName: string; quantity: number }[];
 }
 
 // ─── Price Tracking ─────────────────────────────────────────────
