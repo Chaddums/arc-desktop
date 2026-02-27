@@ -25,32 +25,44 @@ export default function QuestCard({
 }: QuestCardProps) {
   return (
     <TouchableOpacity
-      style={[styles.card, isCompleted && styles.cardCompleted]}
+      style={[
+        styles.card,
+        { backgroundColor: Colors.card, borderColor: Colors.border },
+        isCompleted && { opacity: 0.6, borderColor: Colors.green, borderLeftWidth: 3 },
+      ]}
       onPress={onPress}
       activeOpacity={0.7}
     >
       <TouchableOpacity
-        style={[styles.checkbox, isCompleted && styles.checkboxChecked]}
+        style={[
+          styles.checkbox,
+          { borderColor: Colors.borderAccent },
+          isCompleted && { backgroundColor: Colors.green, borderColor: Colors.green },
+        ]}
         onPress={onToggle}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
-        {isCompleted && <Text style={styles.checkmark}>✓</Text>}
+        {isCompleted && <Text style={styles.checkmark}>{"\u2713"}</Text>}
       </TouchableOpacity>
       <View style={styles.content}>
         <Text
-          style={[styles.name, isCompleted && styles.nameCompleted]}
+          style={[
+            styles.name,
+            { color: Colors.text },
+            isCompleted && { textDecorationLine: "line-through", color: Colors.textSecondary },
+          ]}
           numberOfLines={2}
         >
           {name}
         </Text>
         <View style={styles.meta}>
-          {trader && <Text style={styles.trader}>{trader}</Text>}
+          {trader && <Text style={[styles.trader, { color: Colors.accent }]}>{trader}</Text>}
           {xp != null && xp > 0 && (
-            <Text style={styles.xp}>{xp.toLocaleString()} XP</Text>
+            <Text style={[styles.xp, { color: Colors.textSecondary }]}>{xp.toLocaleString()} XP</Text>
           )}
         </View>
       </View>
-      <Text style={styles.chevron}>›</Text>
+      <Text style={[styles.chevron, { color: Colors.textMuted }]}>{"\u203A"}</Text>
     </TouchableOpacity>
   );
 }
@@ -59,32 +71,20 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 7,
     marginBottom: 4,
-  },
-  cardCompleted: {
-    opacity: 0.6,
-    borderColor: Colors.green,
-    borderLeftWidth: 3,
   },
   checkbox: {
     width: 20,
     height: 20,
     borderRadius: 4,
     borderWidth: 2,
-    borderColor: Colors.borderAccent,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
-  },
-  checkboxChecked: {
-    backgroundColor: Colors.green,
-    borderColor: Colors.green,
   },
   checkmark: {
     fontSize: 14,
@@ -97,11 +97,6 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 13,
     fontWeight: "600",
-    color: Colors.text,
-  },
-  nameCompleted: {
-    textDecorationLine: "line-through",
-    color: Colors.textSecondary,
   },
   meta: {
     flexDirection: "row",
@@ -110,16 +105,13 @@ const styles = StyleSheet.create({
   },
   trader: {
     fontSize: 11,
-    color: Colors.accent,
     fontWeight: "600",
   },
   xp: {
     fontSize: 11,
-    color: Colors.textSecondary,
   },
   chevron: {
     fontSize: 18,
-    color: Colors.textMuted,
     marginLeft: 6,
   },
 });

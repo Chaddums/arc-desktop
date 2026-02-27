@@ -9,18 +9,26 @@ import { View, Text, StyleSheet } from "react-native";
 import { useEventTimer } from "../hooks/useEventTimer";
 import { useAutoQuestTracker } from "../hooks/useAutoQuestTracker";
 import { useQuestTracker } from "../hooks/useQuestTracker";
+import { useEnemyBrowser } from "../hooks/useEnemyBrowser";
+import { useCompletedQuests } from "../hooks/useCompletedQuests";
 import { useAlertSettings } from "../hooks/useAlertSettings";
+import { useMapDetection } from "../hooks/useMapDetection";
 import { formatCountdown } from "../utils/format";
 import { Colors } from "../theme";
 import OverlayChecklist from "./OverlayChecklist";
 import OverlayQuestProgress from "./OverlayQuestProgress";
+import OverlaySquadQuests from "./OverlaySquadQuests";
+import OverlayMapIntel from "./OverlayMapIntel";
 
 export default function OverlayHUD() {
   const { activeEvents, upcomingEvents, now } = useEventTimer();
   const { questsByTrader } = useQuestTracker();
+  const { bots, maps } = useEnemyBrowser();
+  const { completedIds } = useCompletedQuests();
   const allQuests = Object.values(questsByTrader).flat();
   const { completionQueue, dismissCompletion } = useAutoQuestTracker(allQuests);
   const { settings: alertSettings } = useAlertSettings();
+  const { currentMap } = useMapDetection(maps, bots, activeEvents, allQuests, completedIds);
 
   const nextEvent = upcomingEvents[0];
   const countdown = nextEvent ? nextEvent.startTime - now : null;
@@ -106,7 +114,9 @@ export default function OverlayHUD() {
         onDismiss={dismissCompletion}
         audioVolume={alertSettings.audioVolume}
       />
+      <OverlayMapIntel intel={currentMap} />
       <OverlayChecklist />
+      <OverlaySquadQuests />
     </div>
   );
 }

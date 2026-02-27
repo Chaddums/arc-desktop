@@ -10,7 +10,7 @@
  *  5. Striped rows on quest chains and station tiers
  */
 
-import React, { useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors, spacing, fontSize as fs, threatColors } from "../theme";
+import { useColors } from "../theme/ThemeContext";
 import {
   Panel,
   Divider,
@@ -35,6 +36,8 @@ import {
 import { useMissions } from "../hooks/useMissions";
 import { useCompletedQuests } from "../hooks/useCompletedQuests";
 import { useLoadoutChecklist } from "../hooks/useLoadoutChecklist";
+import { useQuestPairing } from "../hooks/useQuestPairing";
+import type { QuestPairing } from "../hooks/useQuestPairing";
 import { loc } from "../utils/loc";
 import type { MissionsViewMode } from "../types";
 
@@ -67,6 +70,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 export default function MissionsScreen() {
   const insets = useSafeAreaInsets();
+  const C = useColors();
   const {
     viewMode,
     setViewMode,
@@ -100,6 +104,10 @@ export default function MissionsScreen() {
 
   const { completedIds, markComplete, markIncomplete } = useCompletedQuests();
   const { addItem: addToChecklist } = useLoadoutChecklist();
+  const { pairings } = useQuestPairing(questsByTrader, completedIds);
+
+  // Phase 7c: Daily plan checked state
+  const [dailyChecked, setDailyChecked] = useState<Set<number>>(new Set());
 
   // ── P1-4: Trader list KPI aggregates ──────────────────────────
 
@@ -154,12 +162,19 @@ export default function MissionsScreen() {
       <KPIBar
         cells={[
           { label: "Total Quests", value: String(traderKpi.totalQuests) },
-          { label: "Completed", value: String(traderKpi.totalCompleted), color: Colors.green },
-          { label: "Progress", value: `${traderKpi.pct}%`, color: Colors.accent },
+          { label: "Completed", value: String(traderKpi.totalCompleted), color: C.green },
+          { label: "Progress", value: `${traderKpi.pct}%`, color: C.accent },
         ]}
       />
 
-      <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Quest Chains</Text>
+      {/* Phase 7a: Manual tracking explanation banner */}
+      <Panel style={styles.card}>
+        <Text style={[styles.bannerText, { color: C.textSecondary }]}>
+          Mark your progress manually using the checkboxes on each quest. Your progress is saved locally.
+        </Text>
+      </Panel>
+
+      <Text style={[styles.sectionTitle, { marginTop: spacing.md, color: C.textSecondary }]}>Quest Chains</Text>
       {TRADERS.map((trader) => {
         const quests = questsByTrader[trader] || [];
         const completed = quests.filter((q) => completedIds.has(q.id)).length;
@@ -175,10 +190,10 @@ export default function MissionsScreen() {
             <Panel style={styles.card}>
               <View style={styles.traderRow}>
                 <View style={styles.traderInfo}>
-                  <Text style={styles.traderName}>{trader}</Text>
-                  <Text style={styles.traderCount}>{completed}/{total} quests</Text>
+                  <Text style={[styles.traderName, { color: C.text }]}>{trader}</Text>
+                  <Text style={[styles.traderCount, { color: C.textSecondary }]}>{completed}/{total} quests</Text>
                 </View>
-                <Text style={styles.chevron}>&#x203A;</Text>
+                <Text style={[styles.chevron, { color: C.textMuted }]}>&#x203A;</Text>
               </View>
               <ProgressBar progress={progress} />
             </Panel>
@@ -188,6 +203,24 @@ export default function MissionsScreen() {
 
       <Divider />
 
+      {/* Phase 7b: Efficient Raid Plans */}
+      {pairings.length > 0 && (
+        <>
+          <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Efficient Raid Plans</Text>
+          {pairings.slice(0, 5).map((pairing, i) => (
+            <Panel key={i} style={styles.card}>
+              <Text style={[styles.pairingMap, { color: C.accent }]}>Run {pairing.map}</Text>
+              <Text style={[styles.pairingReason, { color: C.textSecondary }]}>{pairing.reasoning}</Text>
+              {pairing.quests.map((q, j) => (
+                <Text key={j} style={[styles.pairingQuest, { color: C.text }]}>
+                  {"\u2022"} {q.questName} ({q.trader})
+                </Text>
+              ))}
+            </Panel>
+          ))}
+        </>
+      )}
+
       {/* Quick nav to other views */}
       <View style={styles.quickNav}>
         <TouchableOpacity
@@ -195,14 +228,14 @@ export default function MissionsScreen() {
           onPress={() => setViewMode("hideoutOverview")}
         >
           <Text style={styles.quickNavIcon}>{"\uD83C\uDFD7"}</Text>
-          <Text style={styles.quickNavLabel}>Hideout</Text>
+          <Text style={[styles.quickNavLabel, { color: C.textSecondary }]}>Hideout</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.quickNavButton}
           onPress={() => setViewMode("dailyOptimizer")}
         >
           <Text style={styles.quickNavIcon}>{"\uD83D\uDCCB"}</Text>
-          <Text style={styles.quickNavLabel}>Daily Plan</Text>
+          <Text style={[styles.quickNavLabel, { color: C.textSecondary }]}>Daily Plan</Text>
         </TouchableOpacity>
       </View>
     </>
@@ -216,7 +249,7 @@ export default function MissionsScreen() {
 
       {/* Header row: trader name + progress badge */}
       <View style={styles.chainHeaderRow}>
-        <Text style={styles.sectionTitle}>{selectedTrader}</Text>
+        <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>{selectedTrader}</Text>
         {questChain.length > 0 && (
           <View style={styles.progressBadge}>
             <Text style={styles.progressBadgeText}>{chainProgress}%</Text>
@@ -227,7 +260,7 @@ export default function MissionsScreen() {
       {questChain.length > 0 && (
         <ProgressBar
           progress={chainProgress / 100}
-          color={chainProgress === 100 ? Colors.green : Colors.accent}
+          color={chainProgress === 100 ? C.green : C.accent}
           height={4}
         />
       )}
@@ -240,7 +273,7 @@ export default function MissionsScreen() {
         questChain.map((quest, idx) => {
           const isDone = completedIds.has(quest.id);
           const isLast = idx === questChain.length - 1;
-          const connectorColor = isDone ? Colors.green : Colors.border;
+          const connectorColor = isDone ? C.green : C.border;
 
           return (
             <View
@@ -264,7 +297,7 @@ export default function MissionsScreen() {
                 <View
                   style={[
                     styles.connectorDot,
-                    { backgroundColor: isDone ? Colors.green : Colors.borderAccent },
+                    { backgroundColor: isDone ? C.green : C.borderAccent },
                     isDone && styles.connectorDotDone,
                   ]}
                 />
@@ -303,16 +336,16 @@ export default function MissionsScreen() {
       <>
         <BackHeader title={selectedTrader ?? "Quests"} onBack={goBack} />
         <Panel>
-          <Text style={styles.questTitle}>{loc(questDetail.name) || questDetail.id}</Text>
+          <Text style={[styles.questTitle, { color: C.text }]}>{loc(questDetail.name) || questDetail.id}</Text>
           {questDetail.xp != null && questDetail.xp > 0 && (
-            <Text style={styles.questXp}>{questDetail.xp.toLocaleString()} XP</Text>
+            <Text style={[styles.questXp, { color: C.accent }]}>{questDetail.xp.toLocaleString()} XP</Text>
           )}
           {questDetail.objectives && questDetail.objectives.length > 0 && (
             <>
               <Divider />
-              <Text style={styles.subHeading}>Objectives</Text>
+              <Text style={[styles.subHeading, { color: C.textSecondary }]}>Objectives</Text>
               {questDetail.objectives.map((obj, i) => (
-                <Text key={i} style={styles.objectiveText}>
+                <Text key={i} style={[styles.objectiveText, { color: C.text }]}>
                   {"\u2022"} {loc(obj)}
                 </Text>
               ))}
@@ -326,7 +359,7 @@ export default function MissionsScreen() {
   const renderHideoutOverview = () => (
     <>
       <BackHeader title="Missions" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Crafting Stations</Text>
+      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Crafting Stations</Text>
       <View style={styles.stationGrid}>
         {stations.map((station) => (
           <TouchableOpacity
@@ -337,10 +370,10 @@ export default function MissionsScreen() {
           >
             <Panel style={styles.stationPanel}>
               <Text style={styles.stationIcon}>{STATION_ICONS[station.id] || "\uD83C\uDFD7"}</Text>
-              <Text style={styles.stationName} numberOfLines={2}>
+              <Text style={[styles.stationName, { color: C.text }]} numberOfLines={2}>
                 {loc(station.name) || station.id}
               </Text>
-              <Text style={styles.stationLevels}>
+              <Text style={[styles.stationLevels, { color: C.textSecondary }]}>
                 {(station.levels || []).length} tiers
               </Text>
             </Panel>
@@ -352,7 +385,7 @@ export default function MissionsScreen() {
         <>
           <Divider />
           <TouchableOpacity style={styles.shoppingButton} onPress={goToShoppingList}>
-            <Text style={styles.shoppingButtonText}>
+            <Text style={[styles.shoppingButtonText, { color: C.accent }]}>
               View Shopping List ({selectedCrafts.length} selected)
             </Text>
           </TouchableOpacity>
@@ -371,7 +404,7 @@ export default function MissionsScreen() {
     return (
       <>
         <BackHeader title="Hideout" onBack={goBack} />
-        <Text style={styles.sectionTitle}>{loc(station.name) || station.id}</Text>
+        <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>{loc(station.name) || station.id}</Text>
 
         {(station.levels || []).map((level, idx) => {
           const isSelected = selectedCrafts.some(
@@ -386,12 +419,12 @@ export default function MissionsScreen() {
               <Panel
                 style={{
                   ...styles.tierCard,
-                  ...(isSelected ? { borderColor: Colors.accent } : undefined),
+                  ...(isSelected ? { borderColor: C.accent } : undefined),
                   ...(idx % 2 === 1 ? styles.rowAlt : undefined),
                 }}
               >
                 <View style={styles.tierHeader}>
-                  <Text style={styles.tierTitle}>Tier {level.level}</Text>
+                  <Text style={[styles.tierTitle, { color: C.text }]}>Tier {level.level}</Text>
                   <TouchableOpacity
                     onPress={() => toggleCraft(station.id, level.level)}
                     style={[
@@ -405,8 +438,8 @@ export default function MissionsScreen() {
                   </TouchableOpacity>
                 </View>
                 {level.requirements.map((req, i) => (
-                  <Text key={i} style={styles.reqText}>
-                    {req.itemName ?? req.itemId} \u00D7 {req.quantity}
+                  <Text key={i} style={[styles.reqText, { color: C.textSecondary }]}>
+                    {(req.itemName ?? req.itemId).replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())} {"\u00D7"}{req.quantity}
                   </Text>
                 ))}
               </Panel>
@@ -422,7 +455,7 @@ export default function MissionsScreen() {
   const renderShoppingList = () => (
     <>
       <BackHeader title="Hideout" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Shopping List</Text>
+      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Shopping List</Text>
 
       {shoppingList.length === 0 ? (
         <EmptyState title="Select station tiers to build a shopping list" />
@@ -432,11 +465,11 @@ export default function MissionsScreen() {
           <KPIBar
             cells={[
               { label: "Materials", value: String(shoppingKpi.uniqueMats) },
-              { label: "Total Qty", value: String(shoppingKpi.totalQty), color: Colors.accent },
+              { label: "Total Qty", value: String(shoppingKpi.totalQty), color: C.accent },
               {
                 label: "Est. Cost",
                 value: shoppingKpi.estCost > 0 ? shoppingKpi.estCost.toLocaleString() : "--",
-                color: shoppingKpi.estCost > 0 ? Colors.amber : undefined,
+                color: shoppingKpi.estCost > 0 ? C.amber : undefined,
               },
             ]}
           />
@@ -466,7 +499,7 @@ export default function MissionsScreen() {
                 );
               }}
             >
-              <Text style={styles.shoppingButtonText}>Pin All to Overlay</Text>
+              <Text style={[styles.shoppingButtonText, { color: C.accent }]}>Pin All to Overlay</Text>
             </TouchableOpacity>
           )}
         </>
@@ -479,10 +512,10 @@ export default function MissionsScreen() {
   const renderDailyOptimizer = () => (
     <>
       <BackHeader title="Missions" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Daily Optimizer</Text>
+      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Daily Optimizer</Text>
       <Panel variant="glow">
-        <Text style={styles.optimizerTitle}>Today's Recommendations</Text>
-        <Text style={styles.optimizerHint}>
+        <Text style={[styles.optimizerTitle, { color: C.accent }]}>Today's Recommendations</Text>
+        <Text style={[styles.optimizerHint, { color: C.textSecondary }]}>
           Cross-references active events, quest objectives, and trader refreshes.
         </Text>
       </Panel>
@@ -497,25 +530,49 @@ export default function MissionsScreen() {
         sortedRecommendations.map((rec, i) => {
           const priority: string = (rec as any).priority ?? "low";
           const effort: string | undefined = (rec as any).estimatedEffort;
-          const priorityColor = PRIORITY_COLORS[priority] ?? Colors.textSecondary;
+          const priorityColor = PRIORITY_COLORS[priority] ?? C.textSecondary;
+          const isChecked = dailyChecked.has(i);
 
           return (
-            <Panel key={i} style={styles.card}>
-              <View style={styles.recHeaderRow}>
-                <Text style={styles.recTitle}>{rec.title}</Text>
-                {/* P1-3: Priority badge */}
-                <View style={[styles.priorityBadge, { borderColor: priorityColor }]}>
-                  <Text style={[styles.priorityText, { color: priorityColor }]}>
-                    {priority.toUpperCase()}
-                  </Text>
+            <TouchableOpacity
+              key={i}
+              activeOpacity={0.7}
+              onPress={() => {
+                setDailyChecked((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(i)) {
+                    next.delete(i);
+                  } else {
+                    next.add(i);
+                  }
+                  return next;
+                });
+                if (rec.title.toLowerCase().includes("farm")) {
+                  goToShoppingList();
+                  setViewMode("shoppingList");
+                }
+              }}
+            >
+              <Panel style={[styles.card, isChecked && styles.recCheckedCard]}>
+                <View style={styles.recHeaderRow}>
+                  <View style={[styles.dailyCheckbox, isChecked && styles.dailyCheckboxChecked]}>
+                    {isChecked && <Text style={styles.dailyCheckmark}>{"\u2713"}</Text>}
+                  </View>
+                  <Text style={[styles.recTitle, { color: C.text }, isChecked && styles.recTitleChecked]}>{rec.title}</Text>
+                  {/* P1-3: Priority badge */}
+                  <View style={[styles.priorityBadge, { borderColor: priorityColor }]}>
+                    <Text style={[styles.priorityText, { color: priorityColor }]}>
+                      {priority.toUpperCase()}
+                    </Text>
+                  </View>
                 </View>
-              </View>
-              <Text style={styles.recReason}>{rec.reason}</Text>
-              {/* P1-3: Estimated effort */}
-              {effort && (
-                <Text style={styles.recEffort}>{effort}</Text>
-              )}
-            </Panel>
+                <Text style={[styles.recReason, { color: C.textSecondary }]}>{rec.reason}</Text>
+                {/* P1-3: Estimated effort */}
+                {effort && (
+                  <Text style={[styles.recEffort, { color: C.textMuted }]}>{effort}</Text>
+                )}
+              </Panel>
+            </TouchableOpacity>
           );
         })
       )}
@@ -523,11 +580,11 @@ export default function MissionsScreen() {
       {activeEvents.length > 0 && (
         <>
           <Divider />
-          <Text style={styles.subHeading}>Active Events</Text>
+          <Text style={[styles.subHeading, { color: C.textSecondary }]}>Active Events</Text>
           {activeEvents.map((event, i) => (
             <Panel key={i} style={styles.card}>
-              <Text style={styles.eventName}>{event.name}</Text>
-              <Text style={styles.eventMap}>{event.map}</Text>
+              <Text style={[styles.eventName, { color: C.text }]}>{event.name}</Text>
+              <Text style={[styles.eventMap, { color: C.accent }]}>{event.map}</Text>
             </Panel>
           ))}
         </>
@@ -536,18 +593,18 @@ export default function MissionsScreen() {
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <Text style={styles.header}>Missions</Text>
+    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: C.bg }]}>
+      <Text style={[styles.header, { color: C.text }]}>Missions</Text>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={Colors.accent} />
+          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={C.accent} />
         }
       >
         {error && (
-          <Panel style={styles.errorPanel}>
-            <Text style={styles.errorText}>{error}</Text>
+          <Panel style={[styles.errorPanel, { borderColor: C.red }]}>
+            <Text style={[styles.errorText, { color: C.red }]}>{error}</Text>
           </Panel>
         )}
 
@@ -564,11 +621,10 @@ export default function MissionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
+  container: { flex: 1 },
   header: {
     fontSize: 20,
     fontWeight: "700",
-    color: Colors.text,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xxs,
@@ -578,7 +634,6 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: fs.md,
     fontWeight: "700",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: spacing.sm,
@@ -593,9 +648,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   traderInfo: { flex: 1 },
-  traderName: { fontSize: fs.lg, fontWeight: "700", color: Colors.text },
-  traderCount: { fontSize: 12, color: Colors.textSecondary, marginTop: spacing.xxs },
-  chevron: { fontSize: 24, color: Colors.textMuted },
+  traderName: { fontSize: fs.lg, fontWeight: "700" },
+  traderCount: { fontSize: 12, marginTop: spacing.xxs },
+  chevron: { fontSize: 24 },
+
+  // ── Banner (Phase 7a) ───────────────────────────────────────────
+  bannerText: { fontSize: 12, lineHeight: 18, textAlign: "center" },
+
+  // ── Quest Pairing (Phase 7b) ────────────────────────────────────
+  pairingMap: { fontSize: 15, fontWeight: "700" },
+  pairingReason: { fontSize: 12, marginTop: 2 },
+  pairingQuest: { fontSize: 12, marginTop: 2, lineHeight: 16 },
 
   // ── Quick Nav ──────────────────────────────────────────────────
   quickNav: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
@@ -612,7 +675,6 @@ const styles = StyleSheet.create({
   quickNavLabel: {
     fontSize: 9,
     fontWeight: "700",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -672,25 +734,24 @@ const styles = StyleSheet.create({
   },
 
   // ── Quest Detail ───────────────────────────────────────────────
-  questTitle: { fontSize: fs.xl, fontWeight: "700", color: Colors.text },
-  questXp: { fontSize: fs.md, color: Colors.accent, marginTop: spacing.xs },
+  questTitle: { fontSize: fs.xl, fontWeight: "700" },
+  questXp: { fontSize: fs.md, marginTop: spacing.xs },
   subHeading: {
     fontSize: fs.sm,
     fontWeight: "700",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: spacing.xs,
   },
-  objectiveText: { fontSize: 12, color: Colors.text, marginBottom: 3, lineHeight: 18 },
+  objectiveText: { fontSize: 12, marginBottom: 3, lineHeight: 18 },
 
   // ── Hideout Grid ───────────────────────────────────────────────
   stationGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   stationCell: { width: "31%", minWidth: 90 },
   stationPanel: { alignItems: "center", paddingVertical: 8 },
   stationIcon: { fontSize: 20, marginBottom: 3 },
-  stationName: { fontSize: fs.sm, fontWeight: "600", color: Colors.text, textAlign: "center" },
-  stationLevels: { fontSize: fs.xs, color: Colors.textSecondary, marginTop: spacing.xxs },
+  stationName: { fontSize: fs.sm, fontWeight: "600", textAlign: "center" },
+  stationLevels: { fontSize: fs.xs, marginTop: spacing.xxs },
 
   // ── Station Detail / Tiers ─────────────────────────────────────
   tierCard: { marginBottom: spacing.sm },
@@ -700,7 +761,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.xs,
   },
-  tierTitle: { fontSize: fs.lg, fontWeight: "700", color: Colors.text },
+  tierTitle: { fontSize: fs.lg, fontWeight: "700" },
   selectButton: {
     width: 28,
     height: 28,
@@ -713,7 +774,7 @@ const styles = StyleSheet.create({
   selectButtonActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   selectText: { fontSize: 16, fontWeight: "700", color: Colors.textSecondary },
   selectTextActive: { color: "#fff" },
-  reqText: { fontSize: fs.md, color: Colors.textSecondary, marginTop: spacing.xxs },
+  reqText: { fontSize: fs.md, marginTop: spacing.xxs },
 
   // ── Shopping List (P1-2) ───────────────────────────────────────
   shoppingListSpacer: { height: spacing.sm },
@@ -730,25 +791,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: spacing.sm,
   },
-  shoppingButtonText: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent },
+  shoppingButtonText: { fontSize: fs.lg, fontWeight: "700" },
 
   // ── Daily Optimizer (P1-3) ─────────────────────────────────────
-  optimizerTitle: { fontSize: 16, fontWeight: "700", color: Colors.accent },
-  optimizerHint: { fontSize: 12, color: Colors.textSecondary, marginTop: spacing.xs },
+  optimizerTitle: { fontSize: 16, fontWeight: "700" },
+  optimizerHint: { fontSize: 12, marginTop: spacing.xs },
   recHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.sm,
   },
-  recTitle: { fontSize: fs.lg, fontWeight: "600", color: Colors.text, flex: 1 },
-  recReason: { fontSize: 12, color: Colors.textSecondary, marginTop: spacing.xs, lineHeight: 16 },
+  recTitle: { fontSize: fs.lg, fontWeight: "600", flex: 1 },
+  recTitleChecked: { textDecorationLine: "line-through", opacity: 0.5 },
+  recReason: { fontSize: 12, marginTop: spacing.xs, lineHeight: 16 },
   recEffort: {
     fontSize: fs.xs,
     fontWeight: "600",
-    color: Colors.textMuted,
     marginTop: spacing.xs,
   },
+  recCheckedCard: { opacity: 0.7 },
   priorityBadge: {
     borderWidth: 1,
     borderRadius: 8,
@@ -761,11 +823,32 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
+  // ── Daily Optimizer Checkboxes (Phase 7c) ──────────────────────
+  dailyCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: Colors.borderAccent,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: spacing.xs,
+  },
+  dailyCheckboxChecked: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+  },
+  dailyCheckmark: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#fff",
+  },
+
   // ── Events (daily optimizer section) ───────────────────────────
-  eventName: { fontSize: fs.lg, fontWeight: "600", color: Colors.text },
-  eventMap: { fontSize: 12, color: Colors.accent, marginTop: spacing.xxs },
+  eventName: { fontSize: fs.lg, fontWeight: "600" },
+  eventMap: { fontSize: 12, marginTop: spacing.xxs },
 
   // ── Error ──────────────────────────────────────────────────────
-  errorPanel: { marginBottom: spacing.md, borderColor: Colors.red },
-  errorText: { fontSize: fs.md, color: Colors.red, textAlign: "center" },
+  errorPanel: { marginBottom: spacing.md },
+  errorText: { fontSize: fs.md, textAlign: "center" },
 });

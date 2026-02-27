@@ -37,6 +37,14 @@ const CAPTURE_ZONES = [
     width: 0.5,
     height: 0.15,
   },
+  {
+    id: "loadingScreen",
+    label: "Loading Screen Map Name",
+    x: 0.3,
+    y: 0.85,
+    width: 0.4,
+    height: 0.1,
+  },
 ];
 
 module.exports = CAPTURE_ZONES;

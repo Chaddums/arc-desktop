@@ -15,7 +15,7 @@ export default function BackHeader({ title, onBack }: BackHeaderProps) {
   return (
     <View style={styles.container}>
       <TouchableOpacity onPress={onBack} style={styles.backButton}>
-        <Text style={styles.backText}>&#x2039; {title}</Text>
+        <Text style={[styles.backText, { color: Colors.accent }]}>&#x2039; {title}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -31,7 +31,6 @@ const styles = StyleSheet.create({
   },
   backText: {
     fontSize: 13,
-    color: Colors.accent,
     fontWeight: "600",
   },
 });

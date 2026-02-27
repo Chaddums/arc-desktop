@@ -1,6 +1,5 @@
 /**
  * FilterPills — Generic horizontal filter pill row.
- * Adapted from EventsScreen map filter pills + LAMA MarketScreen category pills.
  */
 
 import React from "react";
@@ -28,10 +27,14 @@ export default function FilterPills({
       contentContainerStyle={styles.content}
     >
       <TouchableOpacity
-        style={[styles.pill, !selected && styles.pillActive]}
+        style={[
+          styles.pill,
+          { borderColor: Colors.border, backgroundColor: Colors.card },
+          !selected && { borderColor: Colors.accent, backgroundColor: "rgba(0, 180, 216, 0.15)" },
+        ]}
         onPress={() => onSelect(null)}
       >
-        <Text style={[styles.pillText, !selected && styles.pillTextActive]}>
+        <Text style={[styles.pillText, { color: Colors.textSecondary }, !selected && { color: Colors.accent }]}>
           {allLabel}
         </Text>
       </TouchableOpacity>
@@ -40,10 +43,14 @@ export default function FilterPills({
         return (
           <TouchableOpacity
             key={opt}
-            style={[styles.pill, isActive && styles.pillActive]}
+            style={[
+              styles.pill,
+              { borderColor: Colors.border, backgroundColor: Colors.card },
+              isActive && { borderColor: Colors.accent, backgroundColor: "rgba(0, 180, 216, 0.15)" },
+            ]}
             onPress={() => onSelect(isActive ? null : opt)}
           >
-            <Text style={[styles.pillText, isActive && styles.pillTextActive]}>
+            <Text style={[styles.pillText, { color: Colors.textSecondary }, isActive && { color: Colors.accent }]}>
               {opt}
             </Text>
           </TouchableOpacity>
@@ -66,19 +73,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.card,
-  },
-  pillActive: {
-    borderColor: Colors.accent,
-    backgroundColor: "rgba(0, 180, 216, 0.15)",
   },
   pillText: {
     fontSize: 12,
     fontWeight: "600",
-    color: Colors.textSecondary,
-  },
-  pillTextActive: {
-    color: Colors.accent,
   },
 });

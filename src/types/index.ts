@@ -203,7 +203,8 @@ export type LoadoutViewMode =
   | "damageSim"
   | "advisor"
   | "riskScore"
-  | "raidLog";
+  | "raidLog"
+  | "buildAdvisor";
 
 export type MarketViewMode =
   | "traderList"
@@ -365,6 +366,8 @@ export interface SquadMember {
   lastSeen: number;
   loadoutSummary?: string;
   suggestedRole?: string;
+  activeQuestIds?: string[];
+  completedQuestIds?: string[];
 }
 
 export interface SquadInfo {

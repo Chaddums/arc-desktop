@@ -37,11 +37,11 @@ class GameDetector {
   _poll() {
     execFile(
       "tasklist",
-      ["/FI", "IMAGENAME eq ArcRaiders.exe", "/NH", "/FO", "CSV"],
+      ["/FI", "IMAGENAME eq PioneerGame.exe", "/NH", "/FO", "CSV"],
       { windowsHide: true },
       (err, stdout) => {
         if (err) return;
-        const found = stdout.includes("ArcRaiders.exe");
+        const found = stdout.includes("PioneerGame.exe");
         if (found !== this._running) {
           this._running = found;
           for (const cb of this._listeners) {

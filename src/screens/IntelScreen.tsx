@@ -8,6 +8,10 @@
  *  3. Imminent event pulse (red border + StatusBadge "ENDING SOON" for <30 min)
  *  4. Striped rows on bot list (alternating rowAlt)
  *  5. Map detail KPIBar (active event count, bot count per map)
+ *
+ * P3: Theme-aware colors via useColors()
+ * P4a: Compact card layouts, horizontal quick nav
+ * P4c: Route planner improvements (editable name, add waypoint, inline lpm)
  */
 
 import React, { useState, useCallback, useMemo } from "react";
@@ -17,9 +21,11 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  TextInput,
   StyleSheet,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useColors } from "../theme/ThemeContext";
 import { Colors, threatColors, spacing, fontSize as fs, textPresets, viewPresets } from "../theme";
 import {
   Accordion,
@@ -36,7 +42,7 @@ import {
 } from "../components";
 import { useIntel } from "../hooks/useIntel";
 import { loc } from "../utils/loc";
-import type { IntelViewMode, Bot, GameMap, SavedRoute } from "../types";
+import type { IntelViewMode, Bot, GameMap, SavedRoute, Waypoint } from "../types";
 
 const MAP_FILTERS = ["Dam", "Spaceport", "Buried City", "Blue Gate", "Stella Montis"];
 
@@ -45,6 +51,7 @@ const IMMINENT_MS = 30 * 60 * 1000;
 
 export default function IntelScreen() {
   const insets = useSafeAreaInsets();
+  const C = useColors();
   const {
     viewMode,
     setViewMode,
@@ -69,12 +76,16 @@ export default function IntelScreen() {
     setSelectedRoute,
     createRoute,
     deleteRoute,
+    updateRoute,
     // Common
     loading,
     error,
     refresh,
     goBack,
   } = useIntel();
+
+  // Local state for adding waypoints in route detail
+  const [newWaypointZone, setNewWaypointZone] = useState("");
 
   const filteredActive = selectedMap
     ? activeEvents.filter((e) => e.map === selectedMap)
@@ -115,6 +126,25 @@ export default function IntelScreen() {
   const threatColor = (threat?: string): string | undefined =>
     threat ? (threatColors as Record<string, string>)[threat] : undefined;
 
+  /** Wrapped createRoute that stays on the route planner list (no auto-navigate). */
+  const handleCreateRoute = useCallback(() => {
+    createRoute();
+    // createRoute sets selectedRoute internally, but we do NOT navigate
+    // to routeDetail. Stay on the planner list.
+  }, [createRoute]);
+
+  /** Add a waypoint to the currently viewed route. */
+  const handleAddWaypoint = useCallback(() => {
+    if (!routeDetail || !newWaypointZone.trim()) return;
+    const wp: Waypoint = {
+      id: `wp_${Date.now()}`,
+      mapId: routeDetail.mapId,
+      zoneName: newWaypointZone.trim(),
+    };
+    updateRoute(routeDetail.id, { waypoints: [...routeDetail.waypoints, wp] });
+    setNewWaypointZone("");
+  }, [routeDetail, newWaypointZone, updateRoute]);
+
   // ── Route KPI aggregates ──────────────────────────────────────
 
   const routeKpi = useMemo(() => {
@@ -143,20 +173,20 @@ export default function IntelScreen() {
         key={`${keyPrefix}-${index}`}
         style={imminent ? { ...styles.eventCard, ...styles.eventCardImminent } : styles.eventCard}
       >
-        <View style={styles.eventRow}>
-          <View style={styles.eventInfo}>
-            <View style={styles.eventNameRow}>
-              <Text style={styles.eventName}>{event.name}</Text>
-              {imminent && (
-                <StatusBadge status="active" label="ENDING SOON" style={styles.imminentBadge} />
-              )}
-            </View>
-            <Text style={styles.eventMap}>{event.map}</Text>
-          </View>
+        <View style={styles.eventRowDense}>
+          <Text style={[styles.eventNameInline, { color: C.text }]} numberOfLines={1}>
+            {event.name}
+          </Text>
+          <Text style={[styles.eventMapInline, { color: C.accent }]} numberOfLines={1}>
+            {event.map}
+          </Text>
           {isActive ? (
-            <CountdownTimer targetTime={event.endTime} now={now} label="Ends in" isActive />
+            <CountdownTimer targetTime={event.endTime} now={now} label="Ends" isActive />
           ) : (
-            <CountdownTimer targetTime={event.startTime} now={now} label="Starts in" />
+            <CountdownTimer targetTime={event.startTime} now={now} label="Starts" />
+          )}
+          {imminent && (
+            <StatusBadge status="active" label="ENDING SOON" style={styles.imminentBadge} />
           )}
         </View>
       </Panel>
@@ -169,13 +199,19 @@ export default function IntelScreen() {
     <>
       <KPIBar
         cells={[
-          { label: "Active", value: String(activeEvents.length), color: Colors.green },
+          { label: "Active", value: String(activeEvents.length), color: C.green },
           { label: "Upcoming", value: String(upcomingEvents.length) },
           { label: "Maps", value: String(maps.length) },
         ]}
       />
 
-      <View style={styles.quickNav}>
+      {/* Compact horizontal ScrollView for quick nav */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.quickNavScroll}
+        contentContainerStyle={styles.quickNavContent}
+      >
         {[
           { label: "Events", icon: "\u23F1", mode: "eventList" as IntelViewMode },
           { label: "Enemies", icon: "\uD83E\uDD16", mode: "enemyList" as IntelViewMode },
@@ -184,25 +220,27 @@ export default function IntelScreen() {
         ].map((item) => (
           <TouchableOpacity
             key={item.mode}
-            style={styles.quickNavButton}
+            style={[styles.quickNavButton, { backgroundColor: C.card, borderColor: C.border }]}
             onPress={() => setViewMode(item.mode)}
           >
             <Text style={styles.quickNavIcon}>{item.icon}</Text>
-            <Text style={styles.quickNavLabel}>{item.label}</Text>
+            <Text style={[styles.quickNavLabel, { color: C.textSecondary }]}>{item.label}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* Active events preview */}
       {filteredActive.length > 0 && (
         <>
-          <Text style={styles.sectionTitle}>Active Now</Text>
+          <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Active Now</Text>
           {filteredActive.slice(0, 3).map((event, i) =>
             renderEventCard(event, "dash-active", i, true),
           )}
           {filteredActive.length > 3 && (
             <TouchableOpacity onPress={() => setViewMode("eventList")}>
-              <Text style={styles.viewAll}>View all {filteredActive.length} events ›</Text>
+              <Text style={[styles.viewAll, { color: C.accent }]}>
+                View all {filteredActive.length} events ›
+              </Text>
             </TouchableOpacity>
           )}
         </>
@@ -220,7 +258,7 @@ export default function IntelScreen() {
         allLabel="All Maps"
       />
 
-      <Text style={styles.sectionTitle}>Active Now</Text>
+      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Active Now</Text>
       {filteredActive.length === 0 ? (
         <EmptyState title="No active events" />
       ) : (
@@ -229,7 +267,7 @@ export default function IntelScreen() {
 
       <Divider />
 
-      <Text style={styles.sectionTitle}>Upcoming</Text>
+      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Upcoming</Text>
       {filteredUpcoming.length === 0 ? (
         <EmptyState title="No upcoming events" />
       ) : (
@@ -243,7 +281,7 @@ export default function IntelScreen() {
   const renderMapDetail = () => (
     <>
       <BackHeader title="Intel" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Maps</Text>
+      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Maps</Text>
       {maps.length === 0 ? (
         <EmptyState title="No map data" hint="Pull to refresh" />
       ) : (
@@ -252,7 +290,7 @@ export default function IntelScreen() {
           const mapBots = bots.filter((b) => b.maps.includes(map.id));
           return (
             <Panel key={map.id} style={styles.eventCard}>
-              <Text style={styles.eventName}>{loc(map.name)}</Text>
+              <Text style={[styles.eventName, { color: C.text }]}>{loc(map.name)}</Text>
 
               {/* P1-5: KPIBar with event + bot counts */}
               <KPIBar
@@ -260,7 +298,7 @@ export default function IntelScreen() {
                   {
                     label: "Active Events",
                     value: String(mapEvents.length),
-                    color: mapEvents.length > 0 ? Colors.green : undefined,
+                    color: mapEvents.length > 0 ? C.green : undefined,
                   },
                   { label: "Enemy Types", value: String(mapBots.length) },
                 ]}
@@ -271,13 +309,13 @@ export default function IntelScreen() {
                   {mapBots.map((bot) => (
                     <TouchableOpacity
                       key={bot.id}
-                      style={styles.mapBotPill}
+                      style={[styles.mapBotPill, { borderColor: C.borderAccent }]}
                       onPress={() => {
                         setSelectedBot(bot.id);
                         setViewMode("enemyDetail");
                       }}
                     >
-                      <Text style={styles.mapBotText}>{loc(bot.name)}</Text>
+                      <Text style={[styles.mapBotText, { color: C.accent }]}>{loc(bot.name)}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -312,11 +350,11 @@ export default function IntelScreen() {
               style={[
                 styles.botRowWrap,
                 // P1-4: Striped rows
-                idx % 2 === 1 && styles.rowAlt,
+                idx % 2 === 1 && { backgroundColor: C.rowAlt },
                 // P1-1: Threat-colored left border
                 {
                   borderLeftWidth: 3,
-                  borderLeftColor: threatColor(bot.threat) ?? Colors.border,
+                  borderLeftColor: threatColor(bot.threat) ?? C.border,
                 },
               ]}
             >
@@ -345,7 +383,7 @@ export default function IntelScreen() {
       .map((mId) => maps.find((m) => m.id === mId))
       .filter(Boolean) as GameMap[];
 
-    const tColor = threatColor(botDetail.threat) ?? Colors.border;
+    const tColor = threatColor(botDetail.threat) ?? C.border;
 
     return (
       <>
@@ -354,14 +392,18 @@ export default function IntelScreen() {
           {/* P1-1: Threat-colored accent bar at top of detail */}
           <View style={[styles.threatAccentBar, { backgroundColor: tColor }]} />
 
-          <Text style={styles.detailTitle}>{loc(botDetail.name)}</Text>
-          {botDetail.type && <Text style={styles.detailSubtitle}>{botDetail.type}</Text>}
+          <Text style={[styles.detailTitle, { color: C.text }]}>{loc(botDetail.name)}</Text>
+          {botDetail.type && (
+            <Text style={[styles.detailSubtitle, { color: C.textSecondary }]}>
+              {botDetail.type}
+            </Text>
+          )}
 
           <Divider />
 
           <View style={styles.detailGrid}>
             <View style={styles.detailCell}>
-              <Text style={styles.detailLabel}>Threat</Text>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Threat</Text>
               <Text
                 style={[
                   styles.detailValue,
@@ -372,19 +414,21 @@ export default function IntelScreen() {
               </Text>
             </View>
             <View style={styles.detailCell}>
-              <Text style={styles.detailLabel}>Weakness</Text>
-              <Text style={styles.detailValue}>{botDetail.weakness ?? "None"}</Text>
+              <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Weakness</Text>
+              <Text style={[styles.detailValue, { color: C.text }]}>
+                {botDetail.weakness ?? "None"}
+              </Text>
             </View>
             {botDetail.destroyXp != null && (
               <View style={styles.detailCell}>
-                <Text style={styles.detailLabel}>Destroy XP</Text>
-                <Text style={styles.detailValue}>{botDetail.destroyXp}</Text>
+                <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Destroy XP</Text>
+                <Text style={[styles.detailValue, { color: C.text }]}>{botDetail.destroyXp}</Text>
               </View>
             )}
             {botDetail.lootXp != null && (
               <View style={styles.detailCell}>
-                <Text style={styles.detailLabel}>Loot XP</Text>
-                <Text style={styles.detailValue}>{botDetail.lootXp}</Text>
+                <Text style={[styles.detailLabel, { color: C.textSecondary }]}>Loot XP</Text>
+                <Text style={[styles.detailValue, { color: C.text }]}>{botDetail.lootXp}</Text>
               </View>
             )}
           </View>
@@ -392,9 +436,9 @@ export default function IntelScreen() {
           {botDetail.drops.length > 0 && (
             <>
               <Divider />
-              <Text style={styles.subHeading}>Drops</Text>
+              <Text style={[styles.subHeading, { color: C.textSecondary }]}>Drops</Text>
               {botDetail.drops.map((drop, i) => (
-                <Text key={i} style={styles.dropText}>
+                <Text key={i} style={[styles.dropText, { color: C.text }]}>
                   {"\u2022"} {drop.replace(/_/g, " ")}
                 </Text>
               ))}
@@ -404,9 +448,9 @@ export default function IntelScreen() {
           {botMaps.length > 0 && (
             <>
               <Divider />
-              <Text style={styles.subHeading}>Found On</Text>
+              <Text style={[styles.subHeading, { color: C.textSecondary }]}>Found On</Text>
               {botMaps.map((m) => (
-                <Text key={m.id} style={styles.dropText}>
+                <Text key={m.id} style={[styles.dropText, { color: C.text }]}>
                   {"\u2022"} {loc(m.name)}
                 </Text>
               ))}
@@ -430,13 +474,15 @@ export default function IntelScreen() {
           {
             label: "Avg Value/Min",
             value: routeKpi.avgLpm > 0 ? String(routeKpi.avgLpm) : "--",
-            color: Colors.accent,
+            color: C.accent,
           },
           { label: "Waypoints", value: String(routeKpi.totalWaypoints) },
         ]}
       />
 
-      <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Saved Routes</Text>
+      <Text style={[styles.sectionTitle, { color: C.textSecondary, marginTop: spacing.md }]}>
+        Saved Routes
+      </Text>
       {routes.length === 0 ? (
         <EmptyState
           icon="\uD83D\uDCCD"
@@ -455,27 +501,35 @@ export default function IntelScreen() {
             <Panel style={styles.eventCard}>
               <View style={styles.eventRow}>
                 <View style={styles.eventInfo}>
-                  <Text style={styles.eventName}>{route.name}</Text>
-                  <Text style={styles.eventMap}>
-                    {route.waypoints.length} waypoints
+                  <Text style={[styles.eventName, { color: C.text }]}>{route.name}</Text>
+                  <Text style={[styles.routeCardMeta, { color: C.textSecondary }]}>
+                    {route.waypoints.length} wp
+                    {route.lootPerMinute != null && route.lootPerMinute > 0
+                      ? ` \u00B7 ~${Math.round(route.lootPerMinute)} val/min`
+                      : ""}
                   </Text>
                 </View>
                 {/* P1-2: Prominent loot/min figure */}
                 {route.lootPerMinute != null && route.lootPerMinute > 0 ? (
-                  <View style={styles.lpmBadge}>
-                    <Text style={styles.lpmValue}>~{Math.round(route.lootPerMinute)}</Text>
-                    <Text style={styles.lpmLabel}>val/min</Text>
+                  <View style={[styles.lpmBadge, { borderColor: C.borderAccent }]}>
+                    <Text style={[styles.lpmValue, { color: C.accent }]}>
+                      ~{Math.round(route.lootPerMinute)}
+                    </Text>
+                    <Text style={[styles.lpmLabel, { color: C.textSecondary }]}>val/min</Text>
                   </View>
                 ) : (
-                  <Text style={styles.chevron}>&#x203A;</Text>
+                  <Text style={[styles.chevron, { color: C.textMuted }]}>&#x203A;</Text>
                 )}
               </View>
             </Panel>
           </TouchableOpacity>
         ))
       )}
-      <TouchableOpacity style={styles.addButton} onPress={createRoute}>
-        <Text style={styles.addButtonText}>+ New Route</Text>
+      <TouchableOpacity
+        style={[styles.addButton, { borderColor: C.accent }]}
+        onPress={handleCreateRoute}
+      >
+        <Text style={[styles.addButtonText, { color: C.accent }]}>+ New Route</Text>
       </TouchableOpacity>
     </>
   );
@@ -489,13 +543,17 @@ export default function IntelScreen() {
         <BackHeader title="Routes" onBack={goBack} />
         <Panel>
           <View style={styles.routeHeader}>
-            <Text style={styles.detailTitle}>{routeDetail.name}</Text>
+            <TextInput
+              style={[styles.detailTitle, { color: C.text, flex: 1 }]}
+              value={routeDetail.name}
+              onChangeText={(text) => updateRoute(routeDetail.id, { name: text })}
+            />
             <TouchableOpacity onPress={() => deleteRoute(routeDetail.id)}>
-              <Text style={styles.deleteText}>Delete</Text>
+              <Text style={[styles.deleteText, { color: C.red }]}>Delete</Text>
             </TouchableOpacity>
           </View>
           {routeDetail.lootPerMinute != null && (
-            <Text style={styles.routeEfficiency}>
+            <Text style={[styles.routeEfficiency, { color: C.green }]}>
               ~{Math.round(routeDetail.lootPerMinute)} value/min
               {totalMinutes > 0 ? ` \u00B7 ~${totalMinutes} min total` : ""}
             </Text>
@@ -503,50 +561,77 @@ export default function IntelScreen() {
 
           <Divider />
 
-          <Text style={styles.subHeading}>Waypoints</Text>
+          <Text style={[styles.subHeading, { color: C.textSecondary }]}>Waypoints</Text>
           {routeDetail.waypoints.length === 0 ? (
-            <Text style={styles.emptyText}>No waypoints added</Text>
+            <Text style={[styles.emptyText, { color: C.textMuted }]}>No waypoints added</Text>
           ) : (
             routeDetail.waypoints.map((wp, i) => (
               <View key={wp.id} style={styles.waypointRow}>
-                <View style={styles.waypointNumber}>
-                  <Text style={styles.waypointNumText}>{i + 1}</Text>
+                <View style={[styles.waypointNumber, { backgroundColor: C.borderAccent }]}>
+                  <Text style={[styles.waypointNumText, { color: C.text }]}>{i + 1}</Text>
                 </View>
                 <View style={styles.waypointInfo}>
-                  <Text style={styles.waypointZone}>
+                  <Text style={[styles.waypointZone, { color: C.text }]}>
                     {wp.zoneName ?? `Waypoint ${i + 1}`}
                   </Text>
-                  {wp.notes && <Text style={styles.waypointNotes}>{wp.notes}</Text>}
+                  {wp.notes && (
+                    <Text style={[styles.waypointNotes, { color: C.textSecondary }]}>
+                      {wp.notes}
+                    </Text>
+                  )}
                   {wp.lootTargets && wp.lootTargets.length > 0 && (
-                    <Text style={styles.waypointLoot}>
+                    <Text style={[styles.waypointLoot, { color: C.accent }]}>
                       Loot: {wp.lootTargets.join(", ")}
                     </Text>
                   )}
                   {wp.estimatedMinutes != null && (
-                    <Text style={styles.waypointTime}>~{wp.estimatedMinutes} min</Text>
+                    <Text style={[styles.waypointTime, { color: C.textMuted }]}>
+                      ~{wp.estimatedMinutes} min
+                    </Text>
                   )}
                 </View>
               </View>
             ))
           )}
+
+          {/* Add Waypoint */}
+          <View style={styles.addWaypointRow}>
+            <TextInput
+              style={[
+                styles.addWaypointInput,
+                { color: C.text, borderColor: C.border, backgroundColor: C.input },
+              ]}
+              placeholder="Zone name..."
+              placeholderTextColor={C.textMuted}
+              value={newWaypointZone}
+              onChangeText={setNewWaypointZone}
+              onSubmitEditing={handleAddWaypoint}
+            />
+            <TouchableOpacity
+              style={[styles.addWaypointBtn, { borderColor: C.accent }]}
+              onPress={handleAddWaypoint}
+            >
+              <Text style={[styles.addWaypointBtnText, { color: C.accent }]}>+ Add</Text>
+            </TouchableOpacity>
+          </View>
         </Panel>
       </>
     );
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <Text style={styles.header}>Intel</Text>
+    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: C.bg }]}>
+      <Text style={[styles.header, { color: C.text }]}>Intel</Text>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={Colors.accent} />
+          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={C.accent} />
         }
       >
         {error && (
-          <Panel style={styles.errorPanel}>
-            <Text style={styles.errorText}>{error}</Text>
+          <Panel style={[styles.errorPanel, { borderColor: C.red }]}>
+            <Text style={[styles.errorText, { color: C.red }]}>{error}</Text>
           </Panel>
         )}
 
@@ -563,11 +648,10 @@ export default function IntelScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.bg },
+  container: { flex: 1 },
   header: {
     fontSize: 20,
     fontWeight: "700",
-    color: Colors.text,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xxs,
@@ -577,43 +661,59 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: fs.md,
     fontWeight: "700",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 1,
     marginBottom: spacing.sm,
     marginTop: spacing.xs,
   },
 
-  // ── Quick Nav ──────────────────────────────────────────────────
-  quickNav: {
-    flexDirection: "row",
-    gap: spacing.sm,
+  // ── Quick Nav (compact horizontal scroll) ──────────────────────
+  quickNavScroll: {
     marginTop: spacing.sm,
+    flexGrow: 0,
+  },
+  quickNavContent: {
+    gap: spacing.sm,
+    paddingRight: spacing.sm,
   },
   quickNavButton: {
-    flex: 1,
     alignItems: "center",
-    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 6,
-    paddingVertical: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    minWidth: 64,
   },
-  quickNavIcon: { fontSize: 16, marginBottom: spacing.xxs },
+  quickNavIcon: { fontSize: 14, marginBottom: spacing.xxs },
   quickNavLabel: {
     fontSize: 9,
     fontWeight: "700",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
 
-  // ── Event Cards ────────────────────────────────────────────────
-  eventCard: { marginBottom: spacing.sm },
+  // ── Event Cards (tighter layout) ───────────────────────────────
+  eventCard: { marginBottom: 4 },
   eventCardImminent: {
     borderColor: "rgba(192, 57, 43, 0.6)",
     borderWidth: 1.5,
   },
+  // Dense single-row layout: name + map + countdown
+  eventRowDense: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    flexWrap: "wrap",
+  },
+  eventNameInline: {
+    fontSize: fs.lg,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  eventMapInline: {
+    fontSize: fs.sm,
+  },
+  // Original eventRow kept for route cards etc.
   eventRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -626,8 +726,8 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     flexWrap: "wrap",
   },
-  eventName: { fontSize: fs.lg, fontWeight: "600", color: Colors.text },
-  eventMap: { fontSize: fs.sm, color: Colors.accent, marginTop: spacing.xxs },
+  eventName: { fontSize: fs.lg, fontWeight: "600" },
+  eventMap: { fontSize: fs.sm, marginTop: spacing.xxs },
   imminentBadge: {
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
@@ -636,7 +736,6 @@ const styles = StyleSheet.create({
   viewAll: {
     fontSize: fs.md,
     fontWeight: "600",
-    color: Colors.accent,
     textAlign: "center",
     paddingVertical: spacing.sm,
   },
@@ -648,9 +747,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     marginBottom: spacing.xxs,
   },
-  rowAlt: {
-    backgroundColor: Colors.rowAlt,
-  },
 
   // ── Enemy Detail ───────────────────────────────────────────────
   threatAccentBar: {
@@ -659,8 +755,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     marginTop: -spacing.xs,
   },
-  detailTitle: { fontSize: fs.xl, fontWeight: "700", color: Colors.text },
-  detailSubtitle: { fontSize: fs.md, color: Colors.textSecondary, marginTop: spacing.xxs },
+  detailTitle: { fontSize: fs.xl, fontWeight: "700" },
+  detailSubtitle: { fontSize: fs.md, marginTop: spacing.xxs },
   detailGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -670,24 +766,22 @@ const styles = StyleSheet.create({
   detailLabel: {
     fontSize: fs.xs,
     fontWeight: "700",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  detailValue: { fontSize: fs.lg, fontWeight: "700", color: Colors.text, marginTop: spacing.xxs },
+  detailValue: { fontSize: fs.lg, fontWeight: "700", marginTop: spacing.xxs },
   subHeading: {
     fontSize: fs.sm,
     fontWeight: "700",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: spacing.xs,
   },
-  dropText: { fontSize: 12, color: Colors.text, marginBottom: 3, lineHeight: 18 },
+  dropText: { fontSize: 12, marginBottom: 3, lineHeight: 18 },
 
   // ── Map Detail ─────────────────────────────────────────────────
   mapMetaRow: { flexDirection: "row", gap: 12, marginTop: spacing.xs },
-  mapMeta: { fontSize: 12, color: Colors.textSecondary },
+  mapMeta: { fontSize: 12 },
   mapBotList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: spacing.sm },
   mapBotPill: {
     paddingHorizontal: spacing.md,
@@ -695,16 +789,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "rgba(0, 180, 216, 0.1)",
     borderWidth: 1,
-    borderColor: Colors.borderAccent,
   },
-  mapBotText: { fontSize: fs.sm, color: Colors.accent, fontWeight: "600" },
+  mapBotText: { fontSize: fs.sm, fontWeight: "600" },
 
   // ── Route Planner ──────────────────────────────────────────────
+  routeCardMeta: {
+    fontSize: fs.sm,
+    marginTop: spacing.xxs,
+  },
   lpmBadge: {
     alignItems: "center",
     backgroundColor: "rgba(0, 180, 216, 0.12)",
     borderWidth: 1,
-    borderColor: Colors.borderAccent,
     borderRadius: 6,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
@@ -713,56 +809,77 @@ const styles = StyleSheet.create({
     fontSize: fs.lg,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
-    color: Colors.accent,
   },
   lpmLabel: {
     fontSize: fs.xs,
     fontWeight: "600",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
-  chevron: { fontSize: 24, color: Colors.textMuted },
+  chevron: { fontSize: 24 },
   addButton: {
     backgroundColor: "rgba(0, 180, 216, 0.15)",
     borderWidth: 1,
-    borderColor: Colors.accent,
     borderRadius: 6,
     padding: 8,
     alignItems: "center",
     marginTop: spacing.sm,
   },
-  addButtonText: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent },
+  addButtonText: { fontSize: fs.lg, fontWeight: "700" },
   routeHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  deleteText: { fontSize: fs.md, fontWeight: "600", color: Colors.red },
-  routeEfficiency: { fontSize: fs.md, color: Colors.green, marginTop: spacing.xs },
+  deleteText: { fontSize: fs.md, fontWeight: "600" },
+  routeEfficiency: { fontSize: fs.md, marginTop: spacing.xs },
   waypointRow: { flexDirection: "row", marginBottom: spacing.sm },
   waypointNumber: {
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: Colors.borderAccent,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
     marginTop: spacing.xxs,
   },
-  waypointNumText: { fontSize: 12, fontWeight: "700", color: Colors.text },
+  waypointNumText: { fontSize: 12, fontWeight: "700" },
   waypointInfo: { flex: 1 },
-  waypointZone: { fontSize: fs.lg, fontWeight: "600", color: Colors.text },
-  waypointNotes: { fontSize: 12, color: Colors.textSecondary, marginTop: spacing.xxs },
-  waypointLoot: { fontSize: fs.sm, color: Colors.accent, marginTop: spacing.xxs },
-  waypointTime: { fontSize: fs.sm, color: Colors.textMuted, marginTop: spacing.xxs },
+  waypointZone: { fontSize: fs.lg, fontWeight: "600" },
+  waypointNotes: { fontSize: 12, marginTop: spacing.xxs },
+  waypointLoot: { fontSize: fs.sm, marginTop: spacing.xxs },
+  waypointTime: { fontSize: fs.sm, marginTop: spacing.xxs },
   emptyText: {
     fontSize: fs.md,
-    color: Colors.textMuted,
     textAlign: "center",
     paddingVertical: spacing.sm,
   },
-  errorPanel: { marginBottom: spacing.md, borderColor: Colors.red },
-  errorText: { fontSize: fs.md, color: Colors.red, textAlign: "center" },
+  errorPanel: { marginBottom: spacing.md, borderWidth: 1 },
+  errorText: { fontSize: fs.md, textAlign: "center" },
+
+  // ── Add Waypoint ───────────────────────────────────────────────
+  addWaypointRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  addWaypointInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    fontSize: fs.md,
+  },
+  addWaypointBtn: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+  },
+  addWaypointBtnText: {
+    fontSize: fs.md,
+    fontWeight: "700",
+  },
 });

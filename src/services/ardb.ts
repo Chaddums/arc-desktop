@@ -34,11 +34,22 @@ export function clearCache(): void {
   cache.clear();
 }
 
-async function fetchJSON<T>(path: string): Promise<T> {
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchJSON<T>(path: string, retries = 3): Promise<T> {
   const url = `${BASE_URL}${path}`;
-  const resp = await crossFetch(url);
-  if (!resp.ok) throw new Error(`ardb ${path}: ${resp.status}`);
-  return resp.json();
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const resp = await crossFetch(url);
+    if (resp.status === 429) {
+      const wait = Math.min(2000 * 2 ** attempt, 10000);
+      console.warn(`ardb ${path}: 429 — retrying in ${wait}ms`);
+      await delay(wait);
+      continue;
+    }
+    if (!resp.ok) throw new Error(`ardb ${path}: ${resp.status}`);
+    return resp.json();
+  }
+  throw new Error(`ardb ${path}: 429 after ${retries} retries`);
 }
 
 /** Fetch detailed item info (crafting recipe, recycling, weapon specs, variants) */

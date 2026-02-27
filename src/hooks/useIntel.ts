@@ -71,6 +71,7 @@ export function useIntel() {
     setSelectedRoute: routePlanner.setSelectedRoute,
     createRoute: routePlanner.createRoute,
     deleteRoute: routePlanner.deleteRoute,
+    updateRoute: routePlanner.updateRoute,
     // Common
     loading: eventTimer.loading || enemyBrowser.loading,
     error: eventTimer.error || enemyBrowser.error,

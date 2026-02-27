@@ -13,7 +13,7 @@
     "build:web": "npx expo export --platform web",
     "electron": "npm run build:web && electron electron/main.js",
     "electron-dev": "electron electron/main.js --dev",
-    "dist": "npm run build:web && electron-builder --win portable --config.win.signAndEditExecutable=false"
+    "dist": "npm run build:web && electron-builder --win --config.win.signAndEditExecutable=false"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -58,8 +58,15 @@
       "main": "electron/main.js"
     },
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ARC View"
     }
   }
 }

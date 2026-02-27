@@ -23,7 +23,9 @@ import MoreScreen from "./src/screens/MoreScreen";
 import OverlayHUD from "./src/components/OverlayHUD";
 import SidebarNav from "./src/components/SidebarNav";
 import TitleBar from "./src/components/TitleBar";
+import AppStatusBar from "./src/components/StatusBar";
 import { Colors, breakpoints } from "./src/theme";
+import { ThemeProvider, useColors } from "./src/theme/ThemeContext";
 
 const Tab = createBottomTabNavigator();
 
@@ -32,7 +34,7 @@ const TAB_ICONS: Record<string, string> = {
   Loadout: "\uD83C\uDFAF",
   Market: "\uD83D\uDCCA",
   Missions: "\uD83D\uDCCB",
-  More: "\u00B7\u00B7\u00B7",
+  More: "\u2699",
 };
 
 const NAV_ITEMS = [
@@ -40,7 +42,7 @@ const NAV_ITEMS = [
   { key: "Loadout", label: "Loadout", icon: "\uD83C\uDFAF" },
   { key: "Market", label: "Market", icon: "\uD83D\uDCCA" },
   { key: "Missions", label: "Missions", icon: "\uD83D\uDCCB" },
-  { key: "More", label: "More", icon: "\u00B7\u00B7\u00B7" },
+  { key: "More", label: "More", icon: "\u2699" },
 ];
 
 const SCREENS: Record<string, React.ComponentType> = {
@@ -52,6 +54,7 @@ const SCREENS: Record<string, React.ComponentType> = {
 };
 
 function TabIcon({ name, focused }: { name: string; focused: boolean }) {
+  const C = useColors();
   return (
     <View style={{ alignItems: "center" }}>
       <Text style={{ fontSize: 18 }}>{TAB_ICONS[name] || "?"}</Text>
@@ -60,7 +63,7 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
           style={{
             width: 14,
             height: 2,
-            backgroundColor: Colors.accent,
+            backgroundColor: C.accent,
             borderRadius: 1,
             marginTop: 2,
           }}
@@ -72,39 +75,55 @@ function TabIcon({ name, focused }: { name: string; focused: boolean }) {
 
 /** Desktop layout: title bar + sidebar + full-width content area */
 function DesktopLayout() {
+  const C = useColors();
   const [activeTab, setActiveTab] = useState("Intel");
+  const [generation, setGeneration] = useState(0);
   const ActiveScreen = SCREENS[activeTab] || IntelScreen;
 
+  const handleSelect = useCallback(
+    (key: string) => {
+      if (key === activeTab) {
+        // Same tab clicked — bump generation to force remount (resets sub-view state)
+        setGeneration((g) => g + 1);
+      } else {
+        setActiveTab(key);
+      }
+    },
+    [activeTab],
+  );
+
   return (
-    <View style={{ flex: 1, backgroundColor: Colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: C.bg }}>
       <TitleBar />
       <View style={{ flex: 1, flexDirection: "row" }}>
         <SidebarNav
           items={NAV_ITEMS}
           activeKey={activeTab}
-          onSelect={setActiveTab}
+          onSelect={handleSelect}
         />
         <View style={{ flex: 1 }}>
-          <ActiveScreen />
+          <ActiveScreen key={`${activeTab}-${generation}`} />
         </View>
       </View>
+      <AppStatusBar />
     </View>
   );
 }
 
 /** Mobile layout: standard bottom tab navigator */
 function MobileLayout() {
+  const C = useColors();
   return (
     <NavigationContainer
       theme={{
         dark: true,
         colors: {
-          primary: Colors.accent,
-          background: Colors.bg,
-          card: Colors.bg,
-          text: Colors.text,
-          border: Colors.borderAccent,
-          notification: Colors.red,
+          primary: C.accent,
+          background: C.bg,
+          card: C.bg,
+          text: C.text,
+          border: C.borderAccent,
+          notification: C.red,
         },
         fonts: {
           regular: { fontFamily: "System", fontWeight: "400" },
@@ -120,11 +139,11 @@ function MobileLayout() {
           tabBarIcon: ({ focused }) => (
             <TabIcon name={route.name} focused={focused} />
           ),
-          tabBarActiveTintColor: Colors.accent,
-          tabBarInactiveTintColor: Colors.textMuted,
+          tabBarActiveTintColor: C.accent,
+          tabBarInactiveTintColor: C.textMuted,
           tabBarStyle: {
-            backgroundColor: Colors.bg,
-            borderTopColor: Colors.borderAccent,
+            backgroundColor: C.bg,
+            borderTopColor: C.borderAccent,
             borderTopWidth: 1,
             paddingTop: 2,
             height: 52,
@@ -159,9 +178,11 @@ export default function App() {
   const isDesktop = Platform.OS === "web" && width >= breakpoints.desktop;
 
   return (
-    <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor={Colors.bg} />
-      {isDesktop ? <DesktopLayout /> : <MobileLayout />}
-    </SafeAreaProvider>
+    <ThemeProvider>
+      <SafeAreaProvider>
+        <StatusBar style="light" backgroundColor={Colors.bg} />
+        {isDesktop ? <DesktopLayout /> : <MobileLayout />}
+      </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

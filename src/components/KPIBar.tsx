@@ -4,7 +4,7 @@
 
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
-import { Colors, spacing, fontSize as fs, fonts } from "../theme";
+import { Colors, spacing, fontSize as fs } from "../theme";
 import type { KPICell } from "../types";
 
 interface KPIBarProps {
@@ -13,16 +13,16 @@ interface KPIBarProps {
 
 export default function KPIBar({ cells }: KPIBarProps) {
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: Colors.card, borderColor: Colors.border }]}>
       {cells.map((cell, i) => (
         <View
           key={i}
-          style={[styles.cell, i < cells.length - 1 && styles.cellBorder]}
+          style={[styles.cell, i < cells.length - 1 && [styles.cellBorder, { borderRightColor: Colors.border }]]}
         >
-          <Text style={[styles.value, cell.color ? { color: cell.color } : null]}>
+          <Text style={[styles.value, { color: cell.color || Colors.accent }]}>
             {cell.value}
           </Text>
-          <Text style={styles.label}>{cell.label}</Text>
+          <Text style={[styles.label, { color: Colors.textSecondary }]}>{cell.label}</Text>
         </View>
       ))}
     </View>
@@ -32,9 +32,7 @@ export default function KPIBar({ cells }: KPIBarProps) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
-    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 6,
     overflow: "hidden",
   },
@@ -45,18 +43,15 @@ const styles = StyleSheet.create({
   },
   cellBorder: {
     borderRightWidth: 1,
-    borderRightColor: Colors.border,
   },
   value: {
     fontSize: fs.xl,
     fontWeight: "700",
     fontVariant: ["tabular-nums"],
-    color: Colors.accent,
   },
   label: {
     fontSize: fs.xs,
     fontWeight: "700",
-    color: Colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginTop: 1,

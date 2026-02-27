@@ -3,11 +3,13 @@
  * Wraps trader browser, price history, crafting profit, watchlist.
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { fetchTraders } from "../services/metaforge";
+import { fetchItemDetail } from "../services/ardb";
 import { usePriceHistory } from "./usePriceHistory";
 import { useMarketWatchlist } from "./useMarketWatchlist";
-import type { Trader, MarketViewMode, CraftingProfitResult, ArdbItemDetail } from "../types";
+import { useCraftingProfit } from "./useCraftingProfit";
+import type { Trader, MarketViewMode, ArdbItemDetail } from "../types";
 
 export function useMarket() {
   const [viewMode, setViewMode] = useState<MarketViewMode>("traderList");
@@ -18,8 +20,13 @@ export function useMarket() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Ardb detail data for crafting profit
+  const [ardbDetails, setArdbDetails] = useState<Map<string, ArdbItemDetail>>(new Map());
+  const [ardbLoading, setArdbLoading] = useState(false);
+
   const priceHistory = usePriceHistory();
   const watchlist = useMarketWatchlist();
+  const { profits: craftingProfits } = useCraftingProfit(ardbDetails);
 
   const loadTraders = useCallback(async () => {
     setLoading(true);
@@ -47,8 +54,41 @@ export function useMarket() {
     loadTraders();
   }, [loadTraders]);
 
-  // Placeholder crafting profits (would need ardb data for real calculation)
-  const craftingProfits = useMemo<CraftingProfitResult[]>(() => [], []);
+  // Lazy-load ardb details when crafting profit view is opened
+  const loadArdbDetails = useCallback(async () => {
+    if (ardbDetails.size > 0 || ardbLoading || traders.length === 0) return;
+    setArdbLoading(true);
+    const allItemIds = new Set<string>();
+    for (const trader of traders) {
+      for (const item of trader.inventory) {
+        allItemIds.add(item.id);
+      }
+    }
+    const detailMap = new Map<string, ArdbItemDetail>();
+    const ids = [...allItemIds];
+    for (let i = 0; i < Math.min(ids.length, 60); i += 5) {
+      const batch = ids.slice(i, i + 5);
+      const results = await Promise.allSettled(batch.map((id) => fetchItemDetail(id)));
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          detailMap.set(result.value.id, result.value);
+        }
+      }
+    }
+    setArdbDetails(new Map(detailMap));
+    setArdbLoading(false);
+  }, [traders, ardbDetails.size, ardbLoading]);
+
+  // Trigger ardb load when entering crafting profit view
+  const setViewModeWrapped = useCallback(
+    (mode: MarketViewMode) => {
+      setViewMode(mode);
+      if (mode === "craftingProfit") {
+        loadArdbDetails();
+      }
+    },
+    [loadArdbDetails],
+  );
 
   const goBack = useCallback(() => {
     switch (viewMode) {
@@ -76,7 +116,7 @@ export function useMarket() {
 
   return {
     viewMode,
-    setViewMode,
+    setViewMode: setViewModeWrapped,
     // Traders
     traders,
     selectedTrader,
@@ -89,6 +129,7 @@ export function useMarket() {
     setSelectedPriceItem,
     // Crafting profit
     craftingProfits,
+    ardbLoading,
     // Watchlist
     watchlist: watchlist.watchlist,
     addToWatchlist: watchlist.addToWatchlist,

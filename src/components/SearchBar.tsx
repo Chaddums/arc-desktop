@@ -18,10 +18,10 @@ export default function SearchBar({
   placeholder = "Search...",
 }: SearchBarProps) {
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: Colors.input, borderColor: Colors.border }]}>
       <Text style={styles.icon}>&#x1F50D;</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, { color: Colors.text }]}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -34,7 +34,7 @@ export default function SearchBar({
           onPress={() => onChangeText("")}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={styles.clear}>✕</Text>
+          <Text style={[styles.clear, { color: Colors.textMuted }]}>{"\u2715"}</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -45,9 +45,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: Colors.input,
     borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 6,
     paddingHorizontal: 10,
     height: 34,
@@ -61,12 +59,10 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 14,
-    color: Colors.text,
     padding: 0,
   },
   clear: {
     fontSize: 14,
-    color: Colors.textMuted,
     marginLeft: 8,
   },
 });

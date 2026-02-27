@@ -36,11 +36,11 @@ export default function TitleBar() {
 
   return (
     <div style={dragRegionStyle}>
-      <View style={styles.bar}>
+      <View style={[styles.bar, { backgroundColor: Colors.bgDeep, borderBottomColor: Colors.border }]}>
         {/* Brand */}
         <View style={styles.brand}>
-          <Text style={styles.brandText}>ARC</Text>
-          <Text style={styles.brandAccent}>VIEW</Text>
+          <Text style={[styles.brandText, { color: Colors.textSecondary }]}>ARC</Text>
+          <Text style={[styles.brandAccent, { color: Colors.accent }]}>VIEW</Text>
         </View>
 
         {/* Spacer (draggable area) */}
@@ -54,21 +54,21 @@ export default function TitleBar() {
               onPress={handleMinimize}
               activeOpacity={0.6}
             >
-              <Text style={styles.controlIcon}>─</Text>
+              <Text style={[styles.controlIcon, { color: Colors.textSecondary }]}>{"\u2500"}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.controlBtn}
               onPress={handleMaximize}
               activeOpacity={0.6}
             >
-              <Text style={styles.controlIcon}>{maximized ? "❐" : "□"}</Text>
+              <Text style={[styles.controlIcon, { color: Colors.textSecondary }]}>{maximized ? "\u2750" : "\u25A1"}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.controlBtn, styles.closeBtn]}
               onPress={handleClose}
               activeOpacity={0.6}
             >
-              <Text style={[styles.controlIcon, styles.closeIcon]}>✕</Text>
+              <Text style={[styles.closeIcon, { color: Colors.textSecondary }]}>{"\u2715"}</Text>
             </TouchableOpacity>
           </View>
         </div>
@@ -92,9 +92,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     height: 32,
-    backgroundColor: Colors.bgDeep,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
     paddingLeft: 12,
   },
   brand: {
@@ -105,13 +103,11 @@ const styles = StyleSheet.create({
   brandText: {
     fontSize: 11,
     fontWeight: "700",
-    color: Colors.textSecondary,
     letterSpacing: 2,
   },
   brandAccent: {
     fontSize: 11,
     fontWeight: "700",
-    color: Colors.accent,
     letterSpacing: 2,
   },
   spacer: {
@@ -130,11 +126,8 @@ const styles = StyleSheet.create({
   },
   controlIcon: {
     fontSize: 12,
-    color: Colors.textSecondary,
   },
-  closeBtn: {
-    // hover handled via web CSS if needed
-  },
+  closeBtn: {},
   closeIcon: {
     fontSize: 11,
   },

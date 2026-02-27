@@ -43,11 +43,22 @@ export function clearCache(): void {
   cache.clear();
 }
 
-async function fetchJSON<T>(path: string): Promise<T> {
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchJSON<T>(path: string, retries = 3): Promise<T> {
   const url = `${BASE_URL}/${path}`;
-  const resp = await crossFetch(url);
-  if (!resp.ok) throw new Error(`RaidTheory ${path}: ${resp.status}`);
-  return resp.json();
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const resp = await crossFetch(url);
+    if (resp.status === 429) {
+      const wait = Math.min(2000 * 2 ** attempt, 10000);
+      console.warn(`RaidTheory ${path}: 429 — retrying in ${wait}ms`);
+      await delay(wait);
+      continue;
+    }
+    if (!resp.ok) throw new Error(`RaidTheory ${path}: ${resp.status}`);
+    return resp.json();
+  }
+  throw new Error(`RaidTheory ${path}: 429 after ${retries} retries`);
 }
 
 /** Fetch bots (16 enemies with threat, drops, maps, XP, weakness) */
@@ -139,9 +150,12 @@ export async function fetchAllHideoutStations(): Promise<CraftingStation[]> {
     "workbench",
   ];
 
-  const stations = await Promise.all(
-    stationIds.map((id) => fetchHideoutStation(id).catch(() => null))
-  );
+  // Fetch stations sequentially to avoid rate limits
+  const stations: (CraftingStation | null)[] = [];
+  for (const id of stationIds) {
+    if (stations.length > 0) await delay(300);
+    stations.push(await fetchHideoutStation(id).catch(() => null));
+  }
 
   const valid = stations.filter(Boolean) as CraftingStation[];
   setCache(key, valid);
@@ -154,20 +168,30 @@ export async function fetchAllQuests(): Promise<RaidTheoryQuest[]> {
   const cached = getCached<RaidTheoryQuest[]>(key, QUEST_CACHE_TTL);
   if (cached) return cached;
 
-  // Get directory listing from GitHub API
-  const dirResp = await crossFetch(
-    "https://api.github.com/repos/RaidTheory/arcraiders-data/contents/quests"
-  );
-  if (!dirResp.ok) throw new Error(`GitHub quests dir: ${dirResp.status}`);
-  const dirEntries: { name: string; download_url: string }[] =
-    await dirResp.json();
+  // Get directory listing from GitHub API (with retry for rate limits)
+  let dirEntries: { name: string; download_url: string }[] = [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const dirResp = await crossFetch(
+      "https://api.github.com/repos/RaidTheory/arcraiders-data/contents/quests"
+    );
+    if (dirResp.status === 403 || dirResp.status === 429) {
+      const wait = Math.min(3000 * 2 ** attempt, 15000);
+      console.warn(`GitHub quests dir: ${dirResp.status} — retrying in ${wait}ms`);
+      await delay(wait);
+      continue;
+    }
+    if (!dirResp.ok) throw new Error(`GitHub quests dir: ${dirResp.status}`);
+    dirEntries = await dirResp.json();
+    break;
+  }
 
   const jsonFiles = dirEntries.filter((e) => e.name.endsWith(".json"));
 
-  // Batch fetch with concurrency limit of 10
+  // Batch fetch with concurrency limit of 5 + delay between batches
   const quests: RaidTheoryQuest[] = [];
-  for (let i = 0; i < jsonFiles.length; i += 10) {
-    const batch = jsonFiles.slice(i, i + 10);
+  for (let i = 0; i < jsonFiles.length; i += 5) {
+    if (i > 0) await delay(500);
+    const batch = jsonFiles.slice(i, i + 5);
     const results = await Promise.all(
       batch.map(async (file) => {
         try {

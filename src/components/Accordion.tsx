@@ -51,38 +51,39 @@ export default function Accordion({
   });
 
   return (
-    <View style={[styles.container, expanded && styles.containerExpanded, style]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: Colors.card, borderColor: Colors.border },
+        expanded && { borderLeftWidth: 2, borderLeftColor: Colors.accent },
+        style,
+      ]}
+    >
       <TouchableOpacity onPress={toggle} activeOpacity={0.7} style={styles.header}>
-        <Animated.Text style={[styles.chevron, { transform: [{ rotate }] }]}>
-          ›
+        <Animated.Text style={[styles.chevron, { color: Colors.textMuted, transform: [{ rotate }] }]}>
+          {"\u203A"}
         </Animated.Text>
         <View style={styles.titleWrap}>
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
-          {subtitle && <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>}
+          <Text style={[styles.title, { color: Colors.text }]} numberOfLines={1}>{title}</Text>
+          {subtitle && <Text style={[styles.subtitle, { color: Colors.textSecondary }]} numberOfLines={1}>{subtitle}</Text>}
         </View>
         {rightText && (
-          <Text style={[styles.rightText, rightColor ? { color: rightColor } : null]}>
+          <Text style={[styles.rightText, { color: rightColor || Colors.textSecondary }]}>
             {rightText}
           </Text>
         )}
       </TouchableOpacity>
-      {expanded && <View style={styles.body}>{children}</View>}
+      {expanded && <View style={[styles.body, { borderTopColor: Colors.border }]}>{children}</View>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 6,
     marginBottom: spacing.sm,
     overflow: "hidden",
-  },
-  containerExpanded: {
-    borderLeftWidth: 2,
-    borderLeftColor: Colors.accent,
   },
   header: {
     flexDirection: "row",
@@ -93,7 +94,6 @@ const styles = StyleSheet.create({
   chevron: {
     fontSize: 18,
     fontWeight: "700",
-    color: Colors.textMuted,
     width: 18,
     textAlign: "center",
   },
@@ -104,23 +104,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: fontSize.md,
     fontWeight: "600",
-    color: Colors.text,
   },
   subtitle: {
     fontSize: fontSize.xs,
-    color: Colors.textSecondary,
     marginTop: 1,
   },
   rightText: {
     fontSize: fontSize.sm,
     fontWeight: "700",
-    color: Colors.textSecondary,
     marginLeft: spacing.sm,
   },
   body: {
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.md,
     borderTopWidth: 1,
-    borderTopColor: Colors.border,
   },
 });

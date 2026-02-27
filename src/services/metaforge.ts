@@ -48,11 +48,22 @@ export function clearAllCaches(): void {
   } catch {}
 }
 
-async function fetchJSON<T>(path: string): Promise<T> {
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchJSON<T>(path: string, retries = 3): Promise<T> {
   const url = `${BASE_URL}${path}`;
-  const resp = await crossFetch(url);
-  if (!resp.ok) throw new Error(`MetaForge ${path}: ${resp.status}`);
-  return resp.json();
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const resp = await crossFetch(url);
+    if (resp.status === 429) {
+      const wait = Math.min(2000 * 2 ** attempt, 10000);
+      console.warn(`MetaForge ${path}: 429 — retrying in ${wait}ms`);
+      await delay(wait);
+      continue;
+    }
+    if (!resp.ok) throw new Error(`MetaForge ${path}: ${resp.status}`);
+    return resp.json();
+  }
+  throw new Error(`MetaForge ${path}: 429 after ${retries} retries`);
 }
 
 /** Fetch items page (50 per page) */
@@ -76,6 +87,7 @@ export async function fetchAllItems(): Promise<MetaForgeItem[]> {
   const allItems: MetaForgeItem[] = [];
   let page = 1;
   while (true) {
+    if (page > 1) await delay(500);
     const items = await fetchItems(page);
     if (!items || items.length === 0) break;
     allItems.push(...items);

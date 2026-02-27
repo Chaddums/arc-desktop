@@ -87,4 +87,7 @@ contextBridge.exposeInMainWorld("arcDesktop", {
 
   /** Run a test capture and return zone info */
   testOCRCapture: () => ipcRenderer.invoke("test-ocr-capture"),
+
+  /** Restart the app */
+  restartApp: () => ipcRenderer.send("restart-app"),
 });

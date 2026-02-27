@@ -97,6 +97,9 @@ interface ArcDesktopAPI {
 
   /** Set window to a size preset */
   windowSetSize: (preset: "default" | "large" | "xl") => void;
+
+  /** Restart the app */
+  restartApp: () => void;
 }
 
 declare global {

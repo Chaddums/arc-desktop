@@ -1,6 +1,6 @@
 /**
  * Toggle — Smooth sliding toggle switch.
- * Two sizes: "small" (28×16) and "normal" (36×20).
+ * Two sizes: "small" (28x16) and "normal" (36x20).
  */
 
 import React, { useRef, useEffect } from "react";

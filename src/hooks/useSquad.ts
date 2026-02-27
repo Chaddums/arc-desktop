@@ -75,6 +75,95 @@ export function useSquad() {
     return { roles, gaps };
   }, [squad]);
 
+  // Update a member's quest lists
+  const updateMemberQuests = useCallback(
+    (accountId: string, activeQuestIds: string[], completedQuestIds: string[]) => {
+      if (!squad) return;
+      const updated = {
+        ...squad,
+        members: squad.members.map((m) =>
+          m.accountId === accountId
+            ? { ...m, activeQuestIds, completedQuestIds }
+            : m
+        ),
+      };
+      setSquad(updated);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    },
+    [squad]
+  );
+
+  // Toggle a single quest active/inactive for a member
+  const toggleMemberQuest = useCallback(
+    (accountId: string, questId: string) => {
+      if (!squad) return;
+      const updated = {
+        ...squad,
+        members: squad.members.map((m) => {
+          if (m.accountId !== accountId) return m;
+          const active = m.activeQuestIds ?? [];
+          const completed = m.completedQuestIds ?? [];
+          if (completed.includes(questId)) {
+            // Uncomplete → back to active
+            return { ...m, completedQuestIds: completed.filter((id) => id !== questId) };
+          } else if (active.includes(questId)) {
+            // Mark as completed
+            return {
+              ...m,
+              completedQuestIds: [...completed, questId],
+            };
+          } else {
+            // Add to active
+            return { ...m, activeQuestIds: [...active, questId] };
+          }
+        }),
+      };
+      setSquad(updated);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    },
+    [squad]
+  );
+
+  // Add a quest to a member's active list
+  const addMemberQuest = useCallback(
+    (accountId: string, questId: string) => {
+      if (!squad) return;
+      const updated = {
+        ...squad,
+        members: squad.members.map((m) => {
+          if (m.accountId !== accountId) return m;
+          const active = m.activeQuestIds ?? [];
+          if (active.includes(questId)) return m;
+          return { ...m, activeQuestIds: [...active, questId] };
+        }),
+      };
+      setSquad(updated);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    },
+    [squad]
+  );
+
+  // Remove a quest from a member entirely
+  const removeMemberQuest = useCallback(
+    (accountId: string, questId: string) => {
+      if (!squad) return;
+      const updated = {
+        ...squad,
+        members: squad.members.map((m) => {
+          if (m.accountId !== accountId) return m;
+          return {
+            ...m,
+            activeQuestIds: (m.activeQuestIds ?? []).filter((id) => id !== questId),
+            completedQuestIds: (m.completedQuestIds ?? []).filter((id) => id !== questId),
+          };
+        }),
+      };
+      setSquad(updated);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    },
+    [squad]
+  );
+
   const leaveSquad = useCallback(() => {
     setSquad(null);
     AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
@@ -88,5 +177,9 @@ export function useSquad() {
     addMember,
     leaveSquad,
     roleAdvisory,
+    updateMemberQuests,
+    toggleMemberQuest,
+    addMemberQuest,
+    removeMemberQuest,
   };
 }

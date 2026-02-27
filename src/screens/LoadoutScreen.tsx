@@ -1,9 +1,9 @@
 /**
  * LoadoutScreen — Tab 2: Item/weapon DB, skill tree, damage sim, build compare,
- * loadout assessment, keep/sell advisor, risk score, raid log.
+ * loadout assessment, keep/sell advisor, risk score, raid log, build advisor.
  */
 
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Colors, rarityColors, spacing, fontSize as fs } from "../theme";
+import { useColors } from "../theme/ThemeContext";
 import {
   Panel,
   Divider,
@@ -30,8 +31,10 @@ import {
 } from "../components";
 import { Sparkline } from "../components";
 import { useLoadout } from "../hooks/useLoadout";
+import { useBuildAdvisor } from "../hooks/useBuildAdvisor";
 import { loc } from "../utils/loc";
 import type { LoadoutViewMode, MetaForgeItem } from "../types";
+import type { PlaystyleGoal, BuildAdvice } from "../hooks/useBuildAdvisor";
 
 const ITEM_CATEGORIES = ["Weapon", "Armor", "Consumable", "Material", "Key"];
 
@@ -76,16 +79,28 @@ function getStatQuality(value: number): { color: string; label: string } {
   return { color: Colors.red, label: "Weak" };
 }
 
-// ─── Average stat value for an item ─────────────────────────────
+// ─── Average stat value for an item (Phase 1b: NaN fix) ─────────
 function avgStatValue(item: MetaForgeItem): number {
   if (!item.stat_block) return 0;
-  const vals = Object.values(item.stat_block).filter((v): v is number => v != null);
+  const vals = Object.values(item.stat_block)
+    .map(v => Number(v))
+    .filter((v): v is number => !isNaN(v) && v != null);
   if (vals.length === 0) return 0;
-  return Math.round(vals.reduce((s, v) => s + v, 0) / vals.length);
+  const avg = vals.reduce((s, v) => s + v, 0) / vals.length;
+  return isNaN(avg) ? 0 : Math.round(avg);
 }
+
+// ─── Playstyle goal config for build advisor ────────────────────
+const PLAYSTYLE_GOALS: { goal: PlaystyleGoal; icon: string; color: string }[] = [
+  { goal: "Aggressive", icon: "A", color: Colors.red },
+  { goal: "Balanced", icon: "B", color: Colors.accent },
+  { goal: "Survival", icon: "S", color: Colors.green },
+  { goal: "Farming", icon: "F", color: Colors.amber },
+];
 
 export default function LoadoutScreen() {
   const insets = useSafeAreaInsets();
+  const C = useColors();
   const {
     viewMode,
     setViewMode,
@@ -136,8 +151,14 @@ export default function LoadoutScreen() {
     refresh,
   } = useLoadout();
 
+  // ─── Build advisor hook ──────────────────────────────────────
+  const { getAdvice } = useBuildAdvisor(items, skillNodes, skillAllocations);
+
   // ─── Local state for equipment slot filter ────────────────────
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
+
+  // ─── Local state for build advisor (default to Balanced) ──────
+  const [buildAdvice, setBuildAdvice] = useState<BuildAdvice | null>(() => getAdvice("Balanced"));
 
   const filteredItems = useMemo(() => {
     let list = items;
@@ -168,7 +189,7 @@ export default function LoadoutScreen() {
       total > 0
         ? Math.round(items.reduce((s, it) => s + avgStatValue(it), 0) / total)
         : 0;
-    return { total, equipped, avgQuality };
+    return { total, equipped, avgQuality: avgQuality || 0 };
   }, [items]);
 
   // ─── Compare: allow selecting items from browse list ──────────
@@ -191,6 +212,22 @@ export default function LoadoutScreen() {
     []
   );
 
+  // ─── Build advisor handler ────────────────────────────────────
+  const handlePlaystyleSelect = useCallback(
+    (goal: PlaystyleGoal) => {
+      const advice = getAdvice(goal);
+      setBuildAdvice(advice);
+    },
+    [getAdvice]
+  );
+
+  // Re-compute advice when items/skills load (getAdvice changes)
+  useEffect(() => {
+    if (buildAdvice?.goal) {
+      setBuildAdvice(getAdvice(buildAdvice.goal));
+    }
+  }, [getAdvice]);
+
   // ══════════════════════════════════════════════════════════════
   //  ITEM BROWSER
   // ══════════════════════════════════════════════════════════════
@@ -199,9 +236,9 @@ export default function LoadoutScreen() {
       {/* Upgrade priority KPI bar */}
       <KPIBar
         cells={[
-          { label: "Total Items", value: String(browserKPI.total) },
-          { label: "Equipped", value: String(browserKPI.equipped), color: Colors.accent },
-          { label: "Avg Quality", value: String(browserKPI.avgQuality), color: browserKPI.avgQuality >= 60 ? Colors.green : Colors.amber },
+          { label: "Known Items", value: String(browserKPI.total) },
+          { label: "With Slots", value: String(browserKPI.equipped), color: C.accent },
+          { label: "Avg Stats", value: String(browserKPI.avgQuality), color: browserKPI.avgQuality >= 60 ? C.green : C.amber },
         ]}
       />
 
@@ -237,14 +274,12 @@ export default function LoadoutScreen() {
         })}
       </View>
 
-      {/* Quick nav row */}
+      {/* Quick nav row — 3 primary tabs */}
       <View style={styles.quickNav}>
         {[
-          { label: "Skills", icon: "S", mode: "skillTree" as LoadoutViewMode },
-          { label: "Damage", icon: "D", mode: "damageSim" as LoadoutViewMode },
-          { label: "Compare", icon: "C", mode: "itemCompare" as LoadoutViewMode },
-          { label: "Risk", icon: "!", mode: "riskScore" as LoadoutViewMode },
-          { label: "Raid Log", icon: "R", mode: "raidLog" as LoadoutViewMode },
+          { label: "Build", subtitle: "Skills + damage simulation", icon: "B", mode: "skillTree" as LoadoutViewMode },
+          { label: "Analyze", subtitle: "Compare + risk + advisor", icon: "A", mode: "itemCompare" as LoadoutViewMode },
+          { label: "History", subtitle: "Your raid performance", icon: "H", mode: "raidLog" as LoadoutViewMode },
         ].map((item) => (
           <TouchableOpacity
             key={item.mode}
@@ -253,9 +288,21 @@ export default function LoadoutScreen() {
           >
             <Text style={styles.quickNavIcon}>{item.icon}</Text>
             <Text style={styles.quickNavLabel}>{item.label}</Text>
+            <Text style={styles.quickNavSubtitle}>{item.subtitle}</Text>
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Build Advisor button */}
+      <TouchableOpacity
+        style={styles.buildAdvisorButton}
+        onPress={() => setViewMode("buildAdvisor")}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.buildAdvisorButtonIcon}>*</Text>
+        <Text style={styles.buildAdvisorButtonText}>Build Advisor</Text>
+        <Text style={styles.buildAdvisorButtonHint}>Get recommendations for your playstyle</Text>
+      </TouchableOpacity>
 
       <View style={styles.listPad}>
         {filteredItems.length === 0 ? (
@@ -747,12 +794,12 @@ export default function LoadoutScreen() {
   );
 
   // ══════════════════════════════════════════════════════════════
-  //  RISK SCORE
+  //  RISK SCORE (Phase 5e: Beta label + disclaimer)
   // ══════════════════════════════════════════════════════════════
   const renderRiskScore = () => (
     <>
       <BackHeader title="Loadout" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Pre-Raid Risk Assessment</Text>
+      <Text style={styles.sectionTitle}>Pre-Raid Risk Assessment (Beta)</Text>
       <Panel>
         <Text style={styles.subHeading}>Select Map</Text>
         <FilterPills
@@ -789,6 +836,7 @@ export default function LoadoutScreen() {
 
           <Divider />
           <Text style={styles.recommendText}>{riskAssessment.recommendation}</Text>
+          <Text style={styles.disclaimerText}>Estimates based on available data</Text>
         </Panel>
       )}
     </>
@@ -881,16 +929,132 @@ export default function LoadoutScreen() {
   };
 
   // ══════════════════════════════════════════════════════════════
+  //  BUILD ADVISOR (Phase 5d)
+  // ══════════════════════════════════════════════════════════════
+  const renderBuildAdvisor = () => (
+    <>
+      <BackHeader title="Loadout" onBack={goBack} />
+      <Text style={styles.sectionTitle}>Build Advisor</Text>
+
+      <Panel>
+        <Text style={styles.subHeading}>Choose Your Playstyle</Text>
+        <Text style={{ color: C.textSecondary, fontSize: 11, marginBottom: 8 }}>
+          {items.length > 0
+            ? `Analyzing ${items.length} items to find the best gear for your style`
+            : "Loading item data..."}
+        </Text>
+        <View style={styles.playstyleGrid}>
+          {PLAYSTYLE_GOALS.map(({ goal, icon, color }) => {
+            const isActive = buildAdvice?.goal === goal;
+            return (
+              <TouchableOpacity
+                key={goal}
+                style={[
+                  styles.playstyleButton,
+                  isActive && { borderColor: color, backgroundColor: color + "18" },
+                ]}
+                onPress={() => handlePlaystyleSelect(goal)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.playstyleIcon, { color: isActive ? color : C.textSecondary }]}>
+                  {icon}
+                </Text>
+                <Text style={[styles.playstyleLabel, { color: isActive ? color : C.textSecondary }]}>
+                  {goal}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </Panel>
+
+      {buildAdvice && (
+        <>
+          {/* Summary */}
+          <Panel variant="glow" style={styles.adviceSummaryPanel}>
+            <Text style={styles.adviceSummaryTitle}>{buildAdvice.goal} Build</Text>
+            <Text style={styles.adviceSummaryText}>{buildAdvice.summary}</Text>
+          </Panel>
+
+          {/* Recommended items by category */}
+          {buildAdvice.itemRecommendations.size === 0 && (
+            <Panel style={styles.adviceItemCard}>
+              <Text style={{ color: C.textSecondary, textAlign: "center", padding: 12 }}>
+                {items.length === 0
+                  ? "Waiting for item data to load..."
+                  : "No scored items found. Try refreshing the item database."}
+              </Text>
+            </Panel>
+          )}
+
+          {Array.from(buildAdvice.itemRecommendations.entries()).map(([category, recs]) => (
+            <View key={category}>
+              <Text style={styles.adviceSlotTitle}>{category}</Text>
+              {recs.slice(0, 5).map((rec, idx) => (
+                <Panel key={rec.itemId} style={styles.adviceItemCard}>
+                  <View style={styles.adviceItemRow}>
+                    <View style={styles.adviceItemInfo}>
+                      <Text style={styles.adviceItemRank}>#{idx + 1}</Text>
+                      <View style={styles.adviceItemTextCol}>
+                        <Text style={styles.adviceItemName} numberOfLines={1}>
+                          {rec.itemName}
+                        </Text>
+                        <Text style={styles.adviceItemReasoning} numberOfLines={2}>
+                          {rec.reasoning}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.adviceItemScore, {
+                      color: rec.score >= 50 ? C.green : rec.score >= 20 ? C.amber : C.textSecondary,
+                    }]}>
+                      {rec.score}
+                    </Text>
+                  </View>
+                </Panel>
+              ))}
+            </View>
+          ))}
+
+          {/* Skill recommendations */}
+          {buildAdvice.skillRecommendations.length > 0 && (
+            <>
+              <Text style={styles.adviceSlotTitle}>Recommended Skills</Text>
+              {buildAdvice.skillRecommendations.map((rec) => (
+                <Panel key={rec.nodeId} style={styles.adviceItemCard}>
+                  <View style={styles.adviceSkillRow}>
+                    <View style={styles.adviceItemTextCol}>
+                      <Text style={styles.adviceItemName}>{rec.nodeName}</Text>
+                      <Text style={styles.adviceItemReasoning}>{rec.reasoning}</Text>
+                    </View>
+                    <Text style={styles.adviceSkillPoints}>
+                      {rec.points} pts
+                    </Text>
+                  </View>
+                </Panel>
+              ))}
+            </>
+          )}
+
+          {/* Beta disclaimer */}
+          <Text style={{ color: C.textSecondary, fontSize: 10, textAlign: "center", marginTop: 12, opacity: 0.6 }}>
+            (Beta) Estimates based on available data
+          </Text>
+        </>
+      )}
+    </>
+  );
+
+  // ══════════════════════════════════════════════════════════════
   //  MAIN RENDER
   // ══════════════════════════════════════════════════════════════
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <Text style={styles.header}>Loadout</Text>
+    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: C.bg }]}>
+      <Text style={[styles.header, { color: C.text }]}>Loadout</Text>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={Colors.accent} />
+          <RefreshControl refreshing={loading} onRefresh={refresh} tintColor={C.accent} />
         }
       >
         {error && (
@@ -908,6 +1072,7 @@ export default function LoadoutScreen() {
         {viewMode === "advisor" && renderAdvisor()}
         {viewMode === "riskScore" && renderRiskScore()}
         {viewMode === "raidLog" && renderRaidLog()}
+        {viewMode === "buildAdvisor" && renderBuildAdvisor()}
       </ScrollView>
     </View>
   );
@@ -980,9 +1145,39 @@ const styles = StyleSheet.create({
 
   // ─── Quick nav ───────────────────────────────────────────────
   quickNav: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.sm, marginBottom: spacing.xs },
-  quickNavButton: { flex: 1, alignItems: "center", backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingVertical: spacing.sm },
+  quickNavButton: { flex: 1, alignItems: "center", backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingVertical: spacing.sm, paddingHorizontal: spacing.xs },
   quickNavIcon: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent, marginBottom: spacing.xxs },
   quickNavLabel: { fontSize: 8, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4 },
+  quickNavSubtitle: { fontSize: 7, color: Colors.textMuted, textAlign: "center", marginTop: 2 },
+
+  // ─── Build Advisor button ────────────────────────────────────
+  buildAdvisorButton: {
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.borderAccent,
+    borderRadius: 6,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+    alignItems: "center",
+  },
+  buildAdvisorButtonIcon: {
+    fontSize: fs.lg,
+    fontWeight: "700",
+    color: Colors.accent,
+    marginBottom: spacing.xxs,
+  },
+  buildAdvisorButtonText: {
+    fontSize: fs.md,
+    fontWeight: "700",
+    color: Colors.accent,
+  },
+  buildAdvisorButtonHint: {
+    fontSize: fs.xs,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
 
   // ─── Item list ───────────────────────────────────────────────
   listPad: { paddingTop: spacing.sm },
@@ -1179,6 +1374,7 @@ const styles = StyleSheet.create({
   factorLabel: { fontSize: fs.md, color: Colors.text },
   factorImpact: { fontSize: fs.md, fontWeight: "700", fontVariant: ["tabular-nums"] },
   recommendText: { fontSize: fs.md, color: Colors.accent, textAlign: "center", fontWeight: "600" },
+  disclaimerText: { fontSize: fs.xs, color: Colors.textMuted, textAlign: "center", marginTop: spacing.sm, fontStyle: "italic" },
 
   // ─── Raid log ────────────────────────────────────────────────
   addButton: { backgroundColor: Colors.accentBg, borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: spacing.sm, alignItems: "center", marginTop: spacing.sm, marginBottom: spacing.sm },
@@ -1195,6 +1391,112 @@ const styles = StyleSheet.create({
   statRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.sm },
   statText: { fontSize: fs.md, color: Colors.textSecondary },
   statLoot: { fontSize: fs.md, color: Colors.accent },
+
+  // ─── Build Advisor ───────────────────────────────────────────
+  playstyleGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  playstyleButton: {
+    flex: 1,
+    minWidth: "40%",
+    flexBasis: "45%",
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 6,
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  playstyleIcon: {
+    fontSize: fs.xl,
+    fontWeight: "700",
+    marginBottom: spacing.xxs,
+  },
+  playstyleLabel: {
+    fontSize: fs.sm,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  adviceSummaryPanel: {
+    marginTop: spacing.sm,
+  },
+  adviceSummaryTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: Colors.accent,
+    marginBottom: spacing.xs,
+  },
+  adviceSummaryText: {
+    fontSize: fs.md,
+    color: Colors.text,
+    lineHeight: 18,
+  },
+  adviceSlotTitle: {
+    fontSize: fs.md,
+    fontWeight: "700",
+    color: Colors.accent,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  adviceItemCard: {
+    marginBottom: spacing.xs,
+  },
+  adviceItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  adviceItemInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  adviceItemRank: {
+    fontSize: fs.md,
+    fontWeight: "700",
+    color: Colors.textMuted,
+    width: 28,
+  },
+  adviceItemTextCol: {
+    flex: 1,
+  },
+  adviceItemName: {
+    fontSize: fs.md,
+    fontWeight: "600",
+    color: Colors.text,
+  },
+  adviceItemReasoning: {
+    fontSize: fs.xs,
+    color: Colors.textSecondary,
+    marginTop: 2,
+    lineHeight: 14,
+  },
+  adviceItemScore: {
+    fontSize: fs.lg,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+    minWidth: 36,
+    textAlign: "right",
+  },
+  adviceSkillRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  adviceSkillPoints: {
+    fontSize: fs.md,
+    fontWeight: "700",
+    color: Colors.accent,
+    minWidth: 40,
+    textAlign: "right",
+  },
 
   // ─── Error ───────────────────────────────────────────────────
   errorPanel: { marginBottom: spacing.md, borderColor: Colors.red },

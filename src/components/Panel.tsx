@@ -15,12 +15,15 @@ interface PanelProps {
 }
 
 export default function Panel({ children, style, variant = "default" }: PanelProps) {
+  const cornerColor = variant === "glow" ? Colors.borderGlow : Colors.borderAccent;
+
   return (
     <View
       style={[
         styles.panel,
-        variant === "elevated" && styles.elevated,
-        variant === "glow" && styles.glow,
+        { backgroundColor: Colors.card, borderColor: Colors.border },
+        variant === "elevated" && { backgroundColor: Colors.cardElevated },
+        variant === "glow" && { backgroundColor: Colors.accentGlow, borderColor: Colors.borderGlow },
         style,
       ]}
     >
@@ -28,14 +31,14 @@ export default function Panel({ children, style, variant = "default" }: PanelPro
         style={[
           styles.corner,
           styles.topLeft,
-          variant === "glow" && styles.cornerGlow,
+          { borderTopColor: cornerColor, borderLeftColor: cornerColor },
         ]}
       />
       <View
         style={[
           styles.corner,
           styles.bottomRight,
-          variant === "glow" && styles.cornerGlow,
+          { borderBottomColor: cornerColor, borderRightColor: cornerColor },
         ]}
       />
       {children}
@@ -45,19 +48,10 @@ export default function Panel({ children, style, variant = "default" }: PanelPro
 
 const styles = StyleSheet.create({
   panel: {
-    backgroundColor: Colors.card,
     borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 6,
     padding: spacing.md,
     position: "relative",
-  },
-  elevated: {
-    backgroundColor: Colors.cardElevated,
-  },
-  glow: {
-    backgroundColor: Colors.accentGlow,
-    borderColor: Colors.borderGlow,
   },
   corner: {
     position: "absolute",
@@ -70,21 +64,11 @@ const styles = StyleSheet.create({
     left: -1,
     borderTopWidth: 1.5,
     borderLeftWidth: 1.5,
-    borderTopColor: Colors.borderAccent,
-    borderLeftColor: Colors.borderAccent,
   },
   bottomRight: {
     bottom: -1,
     right: -1,
     borderBottomWidth: 1.5,
     borderRightWidth: 1.5,
-    borderBottomColor: Colors.borderAccent,
-    borderRightColor: Colors.borderAccent,
-  },
-  cornerGlow: {
-    borderTopColor: Colors.borderGlow,
-    borderLeftColor: Colors.borderGlow,
-    borderBottomColor: Colors.borderGlow,
-    borderRightColor: Colors.borderGlow,
   },
 });

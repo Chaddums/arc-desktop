@@ -18,8 +18,8 @@ export default function EmptyState({ icon, title, hint }: EmptyStateProps) {
     <Panel>
       <View style={styles.container}>
         {icon && <Text style={styles.icon}>{icon}</Text>}
-        <Text style={styles.title}>{title}</Text>
-        {hint && <Text style={styles.hint}>{hint}</Text>}
+        <Text style={[styles.title, { color: Colors.textSecondary }]}>{title}</Text>
+        {hint && <Text style={[styles.hint, { color: Colors.textMuted }]}>{hint}</Text>}
       </View>
     </Panel>
   );
@@ -37,12 +37,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 13,
     fontWeight: "600",
-    color: Colors.textSecondary,
     textAlign: "center",
   },
   hint: {
     fontSize: 11,
-    color: Colors.textMuted,
     textAlign: "center",
     marginTop: 3,
   },
