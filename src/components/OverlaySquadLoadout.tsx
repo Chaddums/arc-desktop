@@ -1,5 +1,6 @@
 /**
- * OverlaySquadLoadout — Teammate weapon + gadget per member.
+ * OverlaySquadLoadout — Teammate gear loadout per member (4 slots).
+ * Shows weapon / shield / backpack / explosive with separators.
  */
 
 import React from "react";
@@ -11,15 +12,27 @@ interface Props {
   squad: SquadInfo | null;
   expanded: boolean;
   onToggle: () => void;
+  headerColor?: string;
+  borderColor?: string;
 }
 
-export default function OverlaySquadLoadout({ squad, expanded, onToggle }: Props) {
+function formatGear(member: { weapon?: string; shield?: string; backpack?: string; explosive?: string }) {
+  const items = [
+    member.weapon || "--",
+    member.shield || "--",
+    member.backpack || "--",
+    member.explosive || "--",
+  ];
+  return items.join(" / ");
+}
+
+export default function OverlaySquadLoadout({ squad, expanded, onToggle, headerColor, borderColor }: Props) {
   if (!squad || squad.members.length === 0) return null;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, borderColor ? { borderColor } : undefined]}>
       <TouchableOpacity onPress={onToggle} style={styles.header} activeOpacity={0.7}>
-        <Text style={styles.headerText}>
+        <Text style={[styles.headerText, headerColor ? { color: headerColor } : undefined]}>
           {expanded ? "\u25B4" : "\u25BE"} SQUAD ({squad.members.length})
         </Text>
       </TouchableOpacity>
@@ -27,22 +40,20 @@ export default function OverlaySquadLoadout({ squad, expanded, onToggle }: Props
       {expanded && (
         <View style={styles.body}>
           {squad.members.map((member) => (
-            <View key={member.accountId} style={styles.row}>
-              <View
-                style={[
-                  styles.dot,
-                  member.isOnline ? styles.dotOnline : styles.dotOffline,
-                ]}
-              />
-              <Text style={styles.memberName} numberOfLines={1}>
-                {member.displayName}
-              </Text>
-              <Text style={styles.gear} numberOfLines={1}>
-                {member.weapon || "--"}
-              </Text>
-              <Text style={styles.gearSep}>|</Text>
-              <Text style={styles.gear} numberOfLines={1}>
-                {member.gadget || "--"}
+            <View key={member.accountId} style={styles.memberBlock}>
+              <View style={styles.nameRow}>
+                <View
+                  style={[
+                    styles.dot,
+                    member.isOnline ? styles.dotOnline : styles.dotOffline,
+                  ]}
+                />
+                <Text style={styles.memberName} numberOfLines={1}>
+                  {member.displayName}
+                </Text>
+              </View>
+              <Text style={styles.gearLine} numberOfLines={1}>
+                {formatGear(member)}
               </Text>
             </View>
           ))}
@@ -73,10 +84,13 @@ const styles = StyleSheet.create({
   body: {
     paddingBottom: 4,
   },
-  row: {
+  memberBlock: {
+    marginBottom: 2,
+  },
+  nameRow: {
     flexDirection: "row",
     alignItems: "center",
-    height: 22,
+    height: 18,
     gap: 6,
   },
   dot: {
@@ -96,13 +110,10 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: Colors.text,
   },
-  gear: {
+  gearLine: {
     fontSize: 9,
     color: Colors.textSecondary,
-    maxWidth: 70,
-  },
-  gearSep: {
-    fontSize: 9,
-    color: Colors.textMuted,
+    paddingLeft: 12,
+    marginTop: -1,
   },
 });

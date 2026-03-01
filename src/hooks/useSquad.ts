@@ -143,15 +143,15 @@ export function useSquad() {
     [squad]
   );
 
-  // Update a member's weapon + gadget
+  // Update a member's loadout (weapon, shield, backpack, explosive)
   const updateMemberLoadout = useCallback(
-    (accountId: string, weapon: string, gadget: string) => {
+    (accountId: string, loadout: { weapon?: string; shield?: string; backpack?: string; explosive?: string }) => {
       if (!squad) return;
       const updated = {
         ...squad,
         members: squad.members.map((m) =>
           m.accountId === accountId
-            ? { ...m, weapon, gadget }
+            ? { ...m, ...loadout }
             : m
         ),
       };

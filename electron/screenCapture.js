@@ -48,7 +48,8 @@ class ScreenCapture {
       this._worker = new Worker(path.join(__dirname, "ocrWorker.js"));
       this._worker.on("message", (result) => {
         this._workerReady = true;
-        if (this._onResult && result.text) {
+        if (this._onResult) {
+          if (!result.text) result.empty = true;
           this._onResult(result);
         }
       });

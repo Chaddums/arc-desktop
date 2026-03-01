@@ -9,6 +9,15 @@ interface OCRResult {
   confidence: number;
   timestamp: number;
   error?: string;
+  empty?: boolean;
+}
+
+interface OCRDebugEntry {
+  time: string;
+  zone: string;
+  confidence: number;
+  text: string;
+  empty: boolean;
 }
 
 interface OCRSettings {
@@ -81,6 +90,15 @@ interface ArcDesktopAPI {
   /** Run a test capture and return zone info */
   testOCRCapture: () => Promise<OCRTestResult | null>;
 
+  /** Get recent OCR debug log entries */
+  getOCRDebugLog: (count?: number) => Promise<OCRDebugEntry[]>;
+
+  /** Clear the OCR debug log */
+  clearOCRDebugLog: () => Promise<void>;
+
+  /** Get the OCR debug log file path */
+  getOCRLogPath: () => Promise<string>;
+
   // ─── Window Controls (frameless title bar) ──────────────────
 
   /** Minimize the window */
@@ -119,6 +137,20 @@ interface ArcDesktopAPI {
 
   /** Stop IPC-based overlay drag */
   overlayStopDrag: () => void;
+
+  // ─── Overlay Config (Builder) ─────────────────────────────
+
+  /** Set overlay anchor position */
+  setOverlayPosition: (anchor: string) => void;
+
+  /** Set overlay appearance (opacity, scale) */
+  setOverlayAppearance: (settings: { opacity: number; scale: number }) => void;
+
+  /** Send full overlay config (sections, colors, etc.) to overlay window */
+  setOverlayConfig: (config: Record<string, unknown>) => void;
+
+  /** Listen for overlay config changes from builder. Returns unsubscribe function. */
+  onOverlayConfigChanged: (cb: (config: Record<string, unknown>) => void) => () => void;
 }
 
 declare global {

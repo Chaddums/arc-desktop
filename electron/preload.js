@@ -88,6 +88,15 @@ contextBridge.exposeInMainWorld("arcDesktop", {
   /** Run a test capture and return zone info */
   testOCRCapture: () => ipcRenderer.invoke("test-ocr-capture"),
 
+  /** Get recent OCR debug log entries */
+  getOCRDebugLog: (count) => ipcRenderer.invoke("get-ocr-debug-log", count),
+
+  /** Clear the OCR debug log */
+  clearOCRDebugLog: () => ipcRenderer.invoke("clear-ocr-debug-log"),
+
+  /** Get the OCR debug log file path */
+  getOCRLogPath: () => ipcRenderer.invoke("get-ocr-log-path"),
+
   /** Restart the app */
   restartApp: () => ipcRenderer.send("restart-app"),
 
@@ -110,5 +119,23 @@ contextBridge.exposeInMainWorld("arcDesktop", {
     const handler = (_event, locked) => cb(locked);
     ipcRenderer.on("overlay-lock-changed", handler);
     return () => ipcRenderer.removeListener("overlay-lock-changed", handler);
+  },
+
+  // ─── Overlay Config (Builder) ──────────────────────────────
+
+  /** Set overlay anchor position */
+  setOverlayPosition: (anchor) => ipcRenderer.send("set-overlay-position", anchor),
+
+  /** Set overlay appearance (opacity, scale) */
+  setOverlayAppearance: (settings) => ipcRenderer.send("set-overlay-appearance", settings),
+
+  /** Send full overlay config to overlay window */
+  setOverlayConfig: (config) => ipcRenderer.send("set-overlay-config", config),
+
+  /** Listen for overlay config changes from builder */
+  onOverlayConfigChanged: (cb) => {
+    const handler = (_event, config) => cb(config);
+    ipcRenderer.on("overlay-config-changed", handler);
+    return () => ipcRenderer.removeListener("overlay-config-changed", handler);
   },
 });

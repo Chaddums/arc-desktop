@@ -20,6 +20,7 @@ import LoadoutScreen from "./src/screens/LoadoutScreen";
 import MarketScreen from "./src/screens/MarketScreen";
 import MissionsScreen from "./src/screens/MissionsScreen";
 import MoreScreen from "./src/screens/MoreScreen";
+import OverlayBuilderScreen from "./src/screens/OverlayBuilderScreen";
 import OverlayHUD from "./src/components/OverlayHUD";
 import SidebarNav from "./src/components/SidebarNav";
 import TitleBar from "./src/components/TitleBar";
@@ -34,6 +35,7 @@ const TAB_ICONS: Record<string, string> = {
   Loadout: "\uD83C\uDFAF",
   Market: "\uD83D\uDCCA",
   Missions: "\uD83D\uDCCB",
+  Overlay: "\uD83D\uDDA5",
   More: "\u2699",
 };
 
@@ -42,6 +44,7 @@ const NAV_ITEMS = [
   { key: "Loadout", label: "Loadout", icon: "\uD83C\uDFAF" },
   { key: "Market", label: "Market", icon: "\uD83D\uDCCA" },
   { key: "Missions", label: "Missions", icon: "\uD83D\uDCCB" },
+  { key: "Overlay", label: "Overlay", icon: "\uD83D\uDDA5" },
   { key: "More", label: "More", icon: "\u2699" },
 ];
 
@@ -50,6 +53,7 @@ const SCREENS: Record<string, React.ComponentType> = {
   Loadout: LoadoutScreen,
   Market: MarketScreen,
   Missions: MissionsScreen,
+  Overlay: OverlayBuilderScreen,
   More: MoreScreen,
 };
 
@@ -160,6 +164,7 @@ function MobileLayout() {
         <Tab.Screen name="Loadout" component={LoadoutScreen} />
         <Tab.Screen name="Market" component={MarketScreen} />
         <Tab.Screen name="Missions" component={MissionsScreen} />
+        <Tab.Screen name="Overlay" component={OverlayBuilderScreen} />
         <Tab.Screen name="More" component={MoreScreen} />
       </Tab.Navigator>
     </NavigationContainer>

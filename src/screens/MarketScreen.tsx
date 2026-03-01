@@ -5,6 +5,7 @@
  */
 
 import React, { useMemo, useState } from "react";
+import { matchesBrowserCategory } from "../utils/itemTypes";
 import {
   View,
   Text,
@@ -32,7 +33,7 @@ import {
 import { useMarket } from "../hooks/useMarket";
 import type { MarketViewMode } from "../types";
 
-const INVENTORY_CATEGORIES = ["Weapon", "Armor", "Consumable", "Material", "Ammo"];
+const INVENTORY_CATEGORIES = ["Weapon", "Shield", "Augment", "Consumable", "Material", "Ammo"];
 
 export default function MarketScreen() {
   const insets = useSafeAreaInsets();
@@ -163,7 +164,8 @@ export default function MarketScreen() {
     let filtered = trader.inventory;
     if (inventoryCategory) {
       filtered = filtered.filter((item) =>
-        item.item_type?.toLowerCase().includes(inventoryCategory.toLowerCase())
+        item.item_type ? matchesBrowserCategory(item.item_type, inventoryCategory) ||
+          item.item_type.toLowerCase().includes(inventoryCategory.toLowerCase()) : false
       );
     }
     if (traderSearch) {

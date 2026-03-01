@@ -380,6 +380,9 @@ export interface SquadMember {
   activeQuestIds?: string[];
   completedQuestIds?: string[];
   weapon?: string;
+  shield?: string;
+  backpack?: string;
+  explosive?: string;
   gadget?: string;
 }
 

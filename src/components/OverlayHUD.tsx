@@ -2,6 +2,7 @@
  * OverlayHUD — In-game HUD with loadout, events, quests, squad, and map intel.
  * ResizeObserver auto-adjusts overlay window height to fit content.
  * Mouse enter/leave toggles click-through via IPC.
+ * Supports dynamic section ordering and HUD color overrides.
  */
 
 import React, { useEffect, useCallback, useState, useRef, useMemo } from "react";
@@ -23,6 +24,7 @@ import { useOverlaySections } from "../hooks/useOverlaySections";
 import { useStashOrganizer } from "../hooks/useStashOrganizer";
 import { formatCountdown } from "../utils/format";
 import { Colors, fonts } from "../theme";
+import type { SectionId, SectionConfig, HudColorConfig } from "../hooks/useOverlayConfig";
 import OverlayEventFeed from "./OverlayEventFeed";
 import OverlayActiveQuests from "./OverlayActiveQuests";
 import OverlaySquadLoadout from "./OverlaySquadLoadout";
@@ -42,6 +44,13 @@ const BUILD_CLASS_COLORS: Record<string, string> = {
   Support: Colors.green,
   Hybrid: Colors.amber,
 };
+
+const DEFAULT_SECTION_ORDER: SectionId[] = [
+  "eventFeed",
+  "activeQuests",
+  "squadLoadout",
+  "mapBriefing",
+];
 
 export default function OverlayHUD() {
   // ─── Existing hooks ────────────────────────────────────────────
@@ -65,6 +74,25 @@ export default function OverlayHUD() {
   const raidLog = useRaidLog();
   const { squad } = useSquad();
   const { sections, toggleSection } = useOverlaySections();
+
+  // ─── Dynamic config from builder (via IPC) ────────────────────
+  const [sectionOrder, setSectionOrder] = useState<SectionId[]>(DEFAULT_SECTION_ORDER);
+  const [hudColors, setHudColors] = useState<HudColorConfig | null>(null);
+
+  useEffect(() => {
+    const unsub = window.arcDesktop?.onOverlayConfigChanged((cfg: any) => {
+      if (cfg.sectionConfigs) {
+        const sorted = [...cfg.sectionConfigs].sort(
+          (a: SectionConfig, b: SectionConfig) => a.order - b.order,
+        );
+        setSectionOrder(sorted.map((s: SectionConfig) => s.id));
+      }
+      if (cfg.hudColors !== undefined) {
+        setHudColors(cfg.hudColors);
+      }
+    });
+    return () => unsub?.();
+  }, []);
 
   // ─── Derived state ─────────────────────────────────────────────
   const nextEvent = upcomingEvents[0];
@@ -172,6 +200,65 @@ export default function OverlayHUD() {
 
   const buildClassColor = BUILD_CLASS_COLORS[myLoadout.buildClass] ?? Colors.textMuted;
 
+  // ─── HUD color overrides ──────────────────────────────────────
+  const accentOverride = hudColors?.accentColor;
+  const borderOverride = hudColors?.borderColor;
+  const headerOverride = hudColors?.headerColor;
+
+  // ─── Section renderer (dynamic order) ─────────────────────────
+  const renderSection = (id: SectionId) => {
+    switch (id) {
+      case "eventFeed":
+        return (
+          <OverlayEventFeed
+            key={id}
+            activeEvents={activeEvents}
+            upcomingEvents={upcomingEvents}
+            now={now}
+            expanded={sections.eventFeed}
+            onToggle={() => toggleSection("eventFeed")}
+          />
+        );
+      case "activeQuests":
+        return (
+          <OverlayActiveQuests
+            key={id}
+            quests={allQuests}
+            completedIds={completedIds}
+            expanded={sections.activeQuests}
+            onToggle={() => toggleSection("activeQuests")}
+          />
+        );
+      case "squadLoadout":
+        return (
+          <OverlaySquadLoadout
+            key={id}
+            squad={squad}
+            expanded={sections.squadLoadout}
+            onToggle={() => toggleSection("squadLoadout")}
+            headerColor={headerOverride}
+            borderColor={borderOverride}
+          />
+        );
+      case "mapBriefing":
+        return (
+          <OverlayMapBriefing
+            key={id}
+            maps={mapRec.maps}
+            selectedMap={mapRec.selectedMap}
+            onSelectMap={mapRec.setSelectedMap}
+            riskAssessment={riskScore.assessment}
+            threatSummary={mapRec.threatSummary}
+            loadoutFitScore={loadoutFitScore}
+            expanded={sections.mapBriefing}
+            onToggle={() => toggleSection("mapBriefing")}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <div
       style={{ display: "flex", flexDirection: "column" }}
@@ -181,7 +268,11 @@ export default function OverlayHUD() {
       <div ref={contentRef}>
         {/* ─── HUD Strip (always visible) ─────────────────────── */}
         <div style={isImminent ? imminentPulseStyle : hasActive ? sheenStyle : undefined}>
-          <View style={[styles.strip, borderStyle]}>
+          <View style={[
+            styles.strip,
+            borderStyle,
+            borderOverride ? { borderColor: borderOverride } : undefined,
+          ]}>
             {/* Drag handle */}
             <div
               style={dragHandleStyle}
@@ -202,7 +293,12 @@ export default function OverlayHUD() {
                   <Text style={[styles.buildTag, { color: buildClassColor }]}>
                     {myLoadout.buildClass}
                   </Text>
-                  <Text style={styles.scoreText}>{myLoadout.stats.overallScore}</Text>
+                  <Text style={[
+                    styles.scoreText,
+                    accentOverride ? { color: accentOverride } : undefined,
+                  ]}>
+                    {myLoadout.stats.overallScore}
+                  </Text>
                 </View>
               </View>
             ) : (
@@ -220,6 +316,7 @@ export default function OverlayHUD() {
               <Text style={[
                 styles.segmentValue,
                 isImminent && styles.segmentValueImminent,
+                accentOverride && !isImminent ? { color: accentOverride } : undefined,
               ]}>
                 {countdown != null && countdown > 0
                   ? formatCountdown(countdown)
@@ -245,38 +342,8 @@ export default function OverlayHUD() {
           </View>
         </div>
 
-        {/* ─── Collapsible Sections ───────────────────────────── */}
-        <OverlayEventFeed
-          activeEvents={activeEvents}
-          upcomingEvents={upcomingEvents}
-          now={now}
-          expanded={sections.eventFeed}
-          onToggle={() => toggleSection("eventFeed")}
-        />
-
-        <OverlayActiveQuests
-          quests={allQuests}
-          completedIds={completedIds}
-          expanded={sections.activeQuests}
-          onToggle={() => toggleSection("activeQuests")}
-        />
-
-        <OverlaySquadLoadout
-          squad={squad}
-          expanded={sections.squadLoadout}
-          onToggle={() => toggleSection("squadLoadout")}
-        />
-
-        <OverlayMapBriefing
-          maps={mapRec.maps}
-          selectedMap={mapRec.selectedMap}
-          onSelectMap={mapRec.setSelectedMap}
-          riskAssessment={riskScore.assessment}
-          threatSummary={mapRec.threatSummary}
-          loadoutFitScore={loadoutFitScore}
-          expanded={sections.mapBriefing}
-          onToggle={() => toggleSection("mapBriefing")}
-        />
+        {/* ─── Collapsible Sections (dynamic order) ──────────── */}
+        {sectionOrder.map(renderSection)}
 
         {/* ─── Existing triggered components ──────────────────── */}
         <OverlayEventToast alerts={eventAlerts} onDismiss={dismissAlert} />

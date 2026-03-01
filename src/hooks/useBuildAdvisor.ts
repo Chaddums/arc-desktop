@@ -6,7 +6,9 @@
 
 import { useMemo } from "react";
 import { loc } from "../utils/loc";
+import { matchesSlot } from "../utils/itemTypes";
 import type { MetaForgeItem, SkillNode } from "../types";
+import type { EquipmentSlot } from "./useMyLoadout";
 
 export type PlaystyleGoal = "Aggressive" | "Balanced" | "Survival" | "Farming";
 
@@ -42,10 +44,10 @@ const STAT_WEIGHTS: Record<PlaystyleGoal, Record<string, number>> = {
 
 // ─── Item type affinity per playstyle (how much each type matters) ─
 const TYPE_AFFINITY: Record<PlaystyleGoal, Record<string, number>> = {
-  Aggressive: { weapon: 25, armor: 10, consumable: 5, material: 0, key: 0 },
-  Balanced:   { weapon: 15, armor: 15, consumable: 10, material: 5, key: 5 },
-  Survival:   { weapon: 5, armor: 25, consumable: 15, material: 5, key: 5 },
-  Farming:    { weapon: 0, armor: 5, consumable: 10, material: 25, key: 15 },
+  Aggressive: { weapon: 25, shield: 10, augment: 10, throwable: 15, consumable: 5, gadget: 5, material: 0, key: 0 },
+  Balanced:   { weapon: 15, shield: 15, augment: 15, throwable: 10, consumable: 10, gadget: 10, material: 5, key: 5 },
+  Survival:   { weapon: 5, shield: 25, augment: 20, throwable: 5, consumable: 15, gadget: 10, material: 5, key: 5 },
+  Farming:    { weapon: 0, shield: 5, augment: 15, throwable: 0, consumable: 10, gadget: 10, material: 25, key: 15 },
 };
 
 // ─── Name keyword bonuses per playstyle ───────────────────────
@@ -71,10 +73,11 @@ const NAME_KEYWORDS: Record<PlaystyleGoal, { keywords: string[]; bonus: number }
 // ─── Categories to group items by (matches MetaForge item_type) ─
 const DISPLAY_CATEGORIES = [
   { key: "weapon", label: "Weapons", match: ["weapon"] },
-  { key: "armor", label: "Armor & Protection", match: ["armor", "helmet", "shield", "vest"] },
-  { key: "consumable", label: "Consumables", match: ["consumable", "medical", "food", "drink", "stim"] },
-  { key: "gear", label: "Gear & Equipment", match: ["backpack", "gadget", "tool", "equipment", "key"] },
-  { key: "material", label: "Materials", match: ["material", "resource", "component", "craft"] },
+  { key: "shield", label: "Shields & Protection", match: ["shield"] },
+  { key: "augment", label: "Augments", match: ["augment"] },
+  { key: "consumable", label: "Consumables", match: ["consumable", "quick use", "nature", "throwable"] },
+  { key: "gear", label: "Gear & Equipment", match: ["gadget", "modification", "mods", "key", "quest item"] },
+  { key: "material", label: "Materials", match: ["material", "recyclable"] },
 ];
 
 function categorizeItem(item: MetaForgeItem): string {
@@ -107,14 +110,20 @@ function scoreItem(item: MetaForgeItem, goal: PlaystyleGoal): number {
   };
   score += rarityBonus[item.rarity?.toLowerCase() ?? ""] ?? 0;
 
-  // 3. Item type affinity
-  const type = item.item_type?.toLowerCase() ?? "";
+  // 3. Item type affinity (map item_type to slot, then look up affinity)
   const affinities = TYPE_AFFINITY[goal];
-  for (const [typeKey, bonus] of Object.entries(affinities)) {
-    if (type.includes(typeKey)) {
-      score += bonus;
-      break;
+  if (item.item_type) {
+    const slots: EquipmentSlot[] = ["weapon", "shield", "augment", "gadget", "consumable", "throwable"];
+    for (const slot of slots) {
+      if (matchesSlot(item.item_type, slot)) {
+        score += affinities[slot] ?? 0;
+        break;
+      }
     }
+    // Fallback: check material/key by substring
+    const type = item.item_type.toLowerCase();
+    if (type.includes("material") || type.includes("recyclable")) score += affinities["material"] ?? 0;
+    else if (type.includes("key") || type.includes("quest")) score += affinities["key"] ?? 0;
   }
 
   // 4. Name keyword matching
@@ -158,11 +167,15 @@ function generateReasoning(item: MetaForgeItem, goal: PlaystyleGoal): string {
   }
 
   // Type reasoning
-  const type = item.item_type ?? "";
-  const affinities = TYPE_AFFINITY[goal];
-  const typeKey = Object.keys(affinities).find((k) => type.toLowerCase().includes(k));
-  if (typeKey && affinities[typeKey] >= 15) {
-    parts.push(`${goal.toLowerCase()}-aligned type`);
+  if (item.item_type) {
+    const affinities = TYPE_AFFINITY[goal];
+    const slots: EquipmentSlot[] = ["weapon", "shield", "augment", "gadget", "consumable", "throwable"];
+    for (const slot of slots) {
+      if (matchesSlot(item.item_type, slot) && (affinities[slot] ?? 0) >= 15) {
+        parts.push(`${goal.toLowerCase()}-aligned type`);
+        break;
+      }
+    }
   }
 
   // Name keyword match

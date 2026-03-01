@@ -12,7 +12,9 @@ export function crossFetch(
   url: string,
   init?: RequestInit,
 ): Promise<Response> {
-  const finalUrl =
-    Platform.OS === "web" ? `${CORS_PROXY}${encodeURIComponent(url)}` : url;
+  // Electron has webSecurity: false and doesn't need a CORS proxy
+  const isElectron = typeof window !== "undefined" && !!(window as any).arcDesktop;
+  const needsProxy = Platform.OS === "web" && !isElectron;
+  const finalUrl = needsProxy ? `${CORS_PROXY}${encodeURIComponent(url)}` : url;
   return fetch(finalUrl, init);
 }

@@ -22,6 +22,7 @@ const DEV = process.argv.includes("--dev");
 const DIST = path.join(__dirname, "..", "dist");
 const GEOMETRY_FILE = path.join(app.getPath("userData"), "window-geometry.json");
 const OVERLAY_SETTINGS_FILE = path.join(app.getPath("userData"), "overlay-settings.json");
+const ocrDebugLog = require("./ocrDebugLog");
 
 // ─── Window Geometry Persistence ─────────────────────────────────
 function loadGeometry() {
@@ -496,6 +497,43 @@ ipcMain.on("overlay-stop-drag", () => {
   }
 });
 
+// ─── Overlay Config (Builder) ────────────────────────────────────
+ipcMain.on("set-overlay-position", (_event, anchor) => {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const display = screen.getDisplayMatching(overlayWindow.getBounds());
+  const { x, y, width: dw, height: dh } = display.workArea;
+  const bounds = overlayWindow.getBounds();
+
+  let newX = bounds.x;
+  let newY = bounds.y;
+
+  if (anchor.includes("left")) {
+    newX = x + OVERLAY_MARGIN;
+  } else {
+    newX = x + dw - bounds.width - OVERLAY_MARGIN;
+  }
+  if (anchor.includes("top")) {
+    newY = y + OVERLAY_MARGIN;
+  } else {
+    newY = y + dh - bounds.height - OVERLAY_MARGIN;
+  }
+
+  overlayWindow.setPosition(newX, newY);
+  saveOverlaySettings({ x: newX, y: newY });
+});
+
+ipcMain.on("set-overlay-appearance", (_event, settings) => {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  // Forward to overlay renderer so OverlayHUD can apply opacity/scale
+  overlayWindow.webContents.send("overlay-appearance-changed", settings);
+});
+
+ipcMain.on("set-overlay-config", (_event, config) => {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  // Forward full config to overlay renderer
+  overlayWindow.webContents.send("overlay-config-changed", config);
+});
+
 // ─── OCR IPC Handlers ───────────────────────────────────────────
 ipcMain.on("start-ocr", () => {
   if (screenCapture && ocrSettings.enabled) screenCapture.start();
@@ -521,6 +559,19 @@ ipcMain.handle("get-ocr-status", () => ({
 ipcMain.handle("test-ocr-capture", async () => {
   if (!screenCapture) return null;
   return screenCapture.testCapture();
+});
+
+// ─── OCR Debug Log IPC ──────────────────────────────────────────
+ipcMain.handle("get-ocr-debug-log", (_event, count) => {
+  return ocrDebugLog.getRecentEntries(count || 50);
+});
+
+ipcMain.handle("clear-ocr-debug-log", () => {
+  ocrDebugLog.clearLog();
+});
+
+ipcMain.handle("get-ocr-log-path", () => {
+  return ocrDebugLog.getLogPath();
 });
 
 // ─── Custom Protocol ────────────────────────────────────────────
@@ -563,7 +614,8 @@ app.whenReady().then(() => {
   try {
     const ScreenCapture = require("./screenCapture");
     screenCapture = new ScreenCapture((result) => {
-      broadcast("ocr-result", result);
+      ocrDebugLog.logOCRResult(result);
+      if (!result.empty) broadcast("ocr-result", result);
     });
     screenCapture.updateSettings(ocrSettings);
   } catch {

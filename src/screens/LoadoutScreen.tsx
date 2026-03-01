@@ -35,17 +35,18 @@ import { formatValue } from "../utils/format";
 import type { LoadoutViewMode, MetaForgeItem, AdvisorVerdict } from "../types";
 import type { PlaystyleGoal, BuildAdvice } from "../hooks/useBuildAdvisor";
 import type { EquipmentSlot } from "../hooks/useMyLoadout";
+import { BROWSER_CATEGORIES, matchesBrowserCategory, matchesSlot } from "../utils/itemTypes";
 
-const ITEM_CATEGORIES = ["Weapon", "Armor", "Consumable", "Material", "Key"];
+const ITEM_CATEGORIES = BROWSER_CATEGORIES.map((c) => c.label);
 
 // ─── Equipment Slot Grid config ──────────────────────────────────
 const EQUIPMENT_SLOTS: { key: EquipmentSlot; label: string; icon: string }[] = [
   { key: "weapon", label: "Weapon", icon: "W" },
-  { key: "armor", label: "Armor", icon: "A" },
-  { key: "helmet", label: "Helmet", icon: "H" },
-  { key: "backpack", label: "Backpack", icon: "B" },
+  { key: "shield", label: "Shield", icon: "S" },
+  { key: "augment", label: "Augment", icon: "A" },
   { key: "gadget", label: "Gadget", icon: "G" },
   { key: "consumable", label: "Consumable", icon: "C" },
+  { key: "throwable", label: "Throwable", icon: "T" },
 ];
 
 // ─── Build classification colors ────────────────────────────────
@@ -173,12 +174,12 @@ export default function LoadoutScreen() {
     let list = items;
     if (selectedCategory) {
       list = list.filter((item) =>
-        item.item_type?.toLowerCase().includes(selectedCategory.toLowerCase())
+        item.item_type ? matchesBrowserCategory(item.item_type, selectedCategory) : false
       );
     }
     if (activeSlot) {
       list = list.filter((item) =>
-        item.item_type?.toLowerCase().includes(activeSlot.toLowerCase())
+        item.item_type ? matchesSlot(item.item_type, activeSlot as EquipmentSlot) : false
       );
     }
     if (itemSearch) {
@@ -192,7 +193,7 @@ export default function LoadoutScreen() {
   const pickerItems = useMemo(() => {
     if (!itemPickerSlot) return [];
     let list = items.filter((item) =>
-      item.item_type?.toLowerCase().includes(itemPickerSlot.toLowerCase())
+      item.item_type ? matchesSlot(item.item_type, itemPickerSlot) : false
     );
     if (pickerSearch) {
       const q = pickerSearch.toLowerCase();

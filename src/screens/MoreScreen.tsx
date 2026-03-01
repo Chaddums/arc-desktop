@@ -1,6 +1,7 @@
 /**
  * MoreScreen — Tab 5: Account, squad coordination, settings, about.
- * Absorbs AboutScreen.
+ * Flat layout — all sections on one scrollable page with collapsible headers.
+ * Includes fast loadout search for squad members.
  */
 
 import React from "react";
@@ -19,11 +20,11 @@ import { useColors } from "../theme/ThemeContext";
 import {
   Panel,
   Divider,
-  BackHeader,
   EmptyState,
-  ProgressBar,
   Toggle,
+  SearchBar,
 } from "../components";
+import type { SearchResult } from "../components/SearchBar";
 import { useSettings } from "../hooks/useSettings";
 import { useAlertSettings } from "../hooks/useAlertSettings";
 import { useOCRSettings } from "../hooks/useOCRSettings";
@@ -31,12 +32,12 @@ import { useTheme } from "../hooks/useTheme";
 import { useSquad } from "../hooks/useSquad";
 import { useQuestTracker } from "../hooks/useQuestTracker";
 import { useCompletedQuests } from "../hooks/useCompletedQuests";
+import { useItemBrowser } from "../hooks/useItemBrowser";
 import { clearAllCaches } from "../services/metaforge";
 import { exportSettings, importSettings } from "../utils/settingsIO";
 import { loc } from "../utils/loc";
-import type { MoreViewMode, SquadMember, RaidTheoryQuest } from "../types";
-import { useState, useCallback, useEffect } from "react";
-import { SearchBar } from "../components";
+import type { RaidTheoryQuest } from "../types";
+import { useState, useCallback, useEffect, useMemo } from "react";
 
 const LANGUAGES = [
   { code: "en", label: "English" },
@@ -57,6 +58,11 @@ const DATA_SOURCES = [
 
 const ACCOUNT_ID_KEY = "@arcview/account-id";
 
+type SectionKey = "account" | "squad" | "settings" | "about";
+
+const GEAR_SLOTS = ["weapon", "shield", "backpack", "explosive"] as const;
+type GearSlot = (typeof GEAR_SLOTS)[number];
+
 export default function MoreScreen() {
   const insets = useSafeAreaInsets();
   const C = useColors();
@@ -67,31 +73,27 @@ export default function MoreScreen() {
   const [testResult, setTestResult] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
   const { theme, preset, setTheme, setColorPreset } = useTheme();
-  const { squad, createSquad, addMember, leaveSquad, roleAdvisory, toggleMemberQuest, addMemberQuest, removeMemberQuest } = useSquad();
+  const { squad, createSquad, addMember, leaveSquad, roleAdvisory, toggleMemberQuest, addMemberQuest, removeMemberQuest, updateMemberLoadout } = useSquad();
   const { questsByTrader } = useQuestTracker();
   const { completedIds } = useCompletedQuests();
+  const { items } = useItemBrowser();
 
-  // All quests flat for quest picker
   const allQuests = Object.values(questsByTrader).flat();
 
-  const [viewMode, setViewMode] = useState<MoreViewMode>("menu");
-  const [selectedMember, setSelectedMember] = useState<string | null>(null);
+  // ─── Collapsible sections ─────────────────────────────────────
+  const [expanded, setExpanded] = useState<Record<SectionKey, boolean>>({
+    account: false,
+    squad: true,
+    settings: false,
+    about: false,
+  });
 
-  // Phase 8a: Squad join mode
-  const [joinMode, setJoinMode] = useState(false);
-  const [joinCode, setJoinCode] = useState("");
+  const toggleExpand = useCallback((key: SectionKey) => {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
-  // Phase 8b: Account ID
+  // ─── Account ─────────────────────────────────────────────────
   const [accountId, setAccountId] = useState("");
-
-  // Phase 8d: Cache status feedback
-  const [cacheStatus, setCacheStatus] = useState<string | null>(null);
-
-  // Squad quest board
-  const [questSearch, setQuestSearch] = useState("");
-  const [addQuestForMember, setAddQuestForMember] = useState<string | null>(null);
-
-  // Load account ID on mount
   useEffect(() => {
     (async () => {
       try {
@@ -100,803 +102,651 @@ export default function MoreScreen() {
       } catch {}
     })();
   }, []);
-
-  // Save account ID on change
   const handleAccountIdChange = useCallback((text: string) => {
     setAccountId(text);
     AsyncStorage.setItem(ACCOUNT_ID_KEY, text).catch(() => {});
   }, []);
 
-  const goBack = useCallback(() => {
-    if (viewMode === "squadMember") {
-      setSelectedMember(null);
-      setViewMode("squad");
-    } else {
-      setViewMode("menu");
-    }
-  }, [viewMode]);
+  // ─── Squad join mode ─────────────────────────────────────────
+  const [joinMode, setJoinMode] = useState(false);
+  const [joinCode, setJoinCode] = useState("");
 
-  const renderMenu = () => (
-    <>
-      {[
-        { label: "Account", icon: "\ud83d\udc64", mode: "account" as MoreViewMode },
-        { label: "Squad", icon: "\ud83d\udc65", mode: "squad" as MoreViewMode },
-        { label: "Settings", icon: "\u2699", mode: "settings" as MoreViewMode },
-        { label: "About", icon: "\u2139", mode: "about" as MoreViewMode },
-      ].map((item) => (
-        <TouchableOpacity
-          key={item.mode}
-          onPress={() => setViewMode(item.mode)}
-          activeOpacity={0.7}
-        >
-          <Panel style={styles.menuItem}>
-            <View style={styles.menuRow}>
-              <Text style={[styles.menuIcon]}>{item.icon}</Text>
-              <Text style={[styles.menuLabel, { color: C.text }]}>{item.label}</Text>
-              <Text style={[styles.chevron, { color: C.textMuted }]}>&#x203A;</Text>
-            </View>
-          </Panel>
-        </TouchableOpacity>
-      ))}
-    </>
+  // ─── Squad quest board ────────────────────────────────────────
+  const [questSearch, setQuestSearch] = useState("");
+  const [addQuestForMember, setAddQuestForMember] = useState<string | null>(null);
+
+  // ─── Fast loadout search ──────────────────────────────────────
+  const [loadoutSearch, setLoadoutSearch] = useState("");
+  const [loadoutTarget, setLoadoutTarget] = useState<{ accountId: string; slot: GearSlot } | null>(null);
+
+  const loadoutResults = useMemo((): SearchResult[] => {
+    if (!loadoutSearch || !loadoutTarget) return [];
+    const q = loadoutSearch.toLowerCase();
+    return items
+      .filter((it) => it.name.toLowerCase().includes(q))
+      .slice(0, 12)
+      .map((it) => ({
+        id: it.id,
+        label: it.name,
+        sublabel: it.item_type || undefined,
+        rightLabel: it.rarity || undefined,
+      }));
+  }, [items, loadoutSearch, loadoutTarget]);
+
+  const handleLoadoutSelect = useCallback(
+    (result: SearchResult) => {
+      if (!loadoutTarget) return;
+      updateMemberLoadout(loadoutTarget.accountId, { [loadoutTarget.slot]: result.label });
+      setLoadoutSearch("");
+      // Auto-advance to next slot
+      const idx = GEAR_SLOTS.indexOf(loadoutTarget.slot);
+      if (idx < GEAR_SLOTS.length - 1) {
+        setLoadoutTarget({ accountId: loadoutTarget.accountId, slot: GEAR_SLOTS[idx + 1] });
+      } else {
+        setLoadoutTarget(null);
+      }
+    },
+    [loadoutTarget, updateMemberLoadout],
   );
 
-  const renderAccount = () => (
-    <>
-      <BackHeader title="More" onBack={goBack} />
-      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Account</Text>
-      <Panel>
-        <Text style={[styles.accountLabel, { color: C.textSecondary }]}>Account ID</Text>
-        <TextInput
-          style={[styles.accountInput, { color: C.text, borderColor: C.border, backgroundColor: C.input }]}
-          value={accountId}
-          onChangeText={handleAccountIdChange}
-          placeholder="Enter your account ID"
-          placeholderTextColor={C.textMuted}
-        />
-        <Divider />
-        <Text style={[styles.accountLabel, { color: C.textSecondary }]}>Sync Status</Text>
-        <Text style={[styles.accountValue, { color: C.accent }]}>Local Storage</Text>
-        <Text style={[styles.accountHint, { color: C.textMuted }]}>
-          Your data is stored on this device. Use the export/import buttons in Settings to back up or transfer your data.
-        </Text>
-      </Panel>
-    </>
-  );
+  // ─── Quest autocomplete ──────────────────────────────────────
+  const questResults = useMemo((): SearchResult[] => {
+    if (!questSearch || !addQuestForMember) return [];
+    const member = squad?.members.find((m) => m.accountId === addQuestForMember);
+    const active = member?.activeQuestIds ?? [];
+    const completed = member?.completedQuestIds ?? [];
+    const q = questSearch.toLowerCase();
+    return allQuests
+      .filter(
+        (quest) =>
+          !active.includes(quest.id) &&
+          !completed.includes(quest.id) &&
+          loc(quest.name).toLowerCase().includes(q),
+      )
+      .slice(0, 12)
+      .map((quest) => ({
+        id: quest.id,
+        label: loc(quest.name),
+        sublabel: quest.trader || undefined,
+      }));
+  }, [questSearch, addQuestForMember, allQuests, squad]);
 
-  const renderSquad = () => (
-    <>
-      <BackHeader title="More" onBack={goBack} />
-      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Squad</Text>
+  // ─── Cache status ─────────────────────────────────────────────
+  const [cacheStatus, setCacheStatus] = useState<string | null>(null);
 
-      {squad ? (
-        <>
-          <Panel variant="glow">
-            <Text style={[styles.squadCodeLabel, { color: C.textSecondary }]}>Squad Code</Text>
-            <TouchableOpacity
-              onPress={() => {
-                if (typeof navigator !== "undefined" && navigator.clipboard) {
-                  navigator.clipboard.writeText(squad.code);
-                }
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.squadCode, { color: C.accent }]}>{squad.code}</Text>
-            </TouchableOpacity>
-            <Text style={[styles.squadHint, { color: C.textMuted }]}>Tap code to copy. Share with your team.</Text>
-          </Panel>
+  // ─── OCR Debug Log ────────────────────────────────────────────
+  const [debugLogExpanded, setDebugLogExpanded] = useState(false);
+  const [debugLogEntries, setDebugLogEntries] = useState<{ time: string; zone: string; confidence: number; text: string; empty: boolean }[]>([]);
 
-          {squad.members.length > 0 && (
-            <>
-              <Text style={[styles.sectionTitle, { color: C.textSecondary, marginTop: 10 }]}>Members</Text>
-              {squad.members.map((member) => (
-                <TouchableOpacity
-                  key={member.accountId}
-                  onPress={() => {
-                    setSelectedMember(member.accountId);
-                    setViewMode("squadMember");
-                  }}
-                >
-                  <Panel style={styles.memberCard}>
-                    <View style={styles.memberRow}>
-                      <View style={[styles.statusDot, {
-                        backgroundColor: member.isOnline ? C.statusOnline : C.statusOffline
-                      }]} />
-                      <View style={styles.memberInfo}>
-                        <Text style={[styles.memberName, { color: C.text }]}>{member.displayName}</Text>
-                        {member.loadoutSummary && (
-                          <Text style={[styles.memberLoadout, { color: C.textSecondary }]}>{member.loadoutSummary}</Text>
-                        )}
-                      </View>
-                      {member.suggestedRole && (
-                        <Text style={[styles.memberRole, { color: C.accent }]}>{member.suggestedRole}</Text>
-                      )}
-                      <Text style={[styles.chevron, { color: C.textMuted }]}>&#x203A;</Text>
-                    </View>
-                  </Panel>
-                </TouchableOpacity>
-              ))}
-            </>
-          )}
+  useEffect(() => {
+    if (!debugLogExpanded || !isDesktop) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const entries = await window.arcDesktop?.getOCRDebugLog?.(50);
+        if (!cancelled && entries) setDebugLogEntries(entries);
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [debugLogExpanded, isDesktop]);
 
-          {squad.members.length === 0 && (
-            <EmptyState icon="\ud83d\udc65" title="No members yet" hint="Share the squad code" />
-          )}
-
-          {roleAdvisory && roleAdvisory.gaps.length > 0 && (
-            <>
-              <Text style={[styles.sectionTitle, { color: C.textSecondary, marginTop: 10 }]}>Role Gaps</Text>
-              <Panel>
-                {roleAdvisory.gaps.map((gap, i) => (
-                  <Text key={i} style={[styles.roleGapText, { color: C.amber }]}>{gap}</Text>
-                ))}
-              </Panel>
-            </>
-          )}
-
-          {/* ── Quest Board ── */}
-          <Text style={[styles.sectionTitle, { color: C.textSecondary, marginTop: 12 }]}>Quest Board</Text>
-          <Text style={[styles.questBoardHint, { color: C.textMuted }]}>
-            Track what quests your squad is working on. Tap a quest to mark it done.
-          </Text>
-
-          {squad.members.length === 0 ? (
-            <EmptyState icon={"\ud83d\udcdd"} title="Add members to track quests" />
-          ) : (
-            squad.members.map((member) => {
-              const active = member.activeQuestIds ?? [];
-              const completed = member.completedQuestIds ?? [];
-              const totalQuests = active.length;
-              const doneCount = completed.length;
-              const isAddingForThis = addQuestForMember === member.accountId;
-
-              // Resolve quest names
-              const questMap = new Map<string, RaidTheoryQuest>();
-              allQuests.forEach((q) => questMap.set(q.id, q));
-
-              // Filtered quest list for adding
-              const searchLower = questSearch.toLowerCase();
-              const availableQuests = allQuests.filter(
-                (q) =>
-                  !active.includes(q.id) &&
-                  !completed.includes(q.id) &&
-                  (searchLower === "" || loc(q.name).toLowerCase().includes(searchLower))
-              );
-
-              return (
-                <Panel key={member.accountId} style={{ marginBottom: 6 }}>
-                  <View style={styles.questMemberHeader}>
-                    <View style={[styles.statusDot, { backgroundColor: member.isOnline ? C.statusOnline : C.statusOffline }]} />
-                    <Text style={[styles.memberName, { color: C.text, flex: 1 }]}>{member.displayName}</Text>
-                    <Text style={[styles.questCount, { color: totalQuests > 0 ? C.accent : C.textMuted }]}>
-                      {doneCount}/{totalQuests}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => setAddQuestForMember(isAddingForThis ? null : member.accountId)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Text style={[styles.addQuestIcon, { color: C.accent }]}>{isAddingForThis ? "\u2212" : "+"}</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Active & completed quests */}
-                  {[...active, ...completed.filter((id) => !active.includes(id))].map((questId) => {
-                    const quest = questMap.get(questId);
-                    const isDone = completed.includes(questId);
-                    return (
-                      <View key={questId} style={styles.questRow}>
-                        <TouchableOpacity
-                          style={[styles.questCheckbox, { borderColor: C.borderAccent }, isDone && { backgroundColor: C.green, borderColor: C.green }]}
-                          onPress={() => toggleMemberQuest(member.accountId, questId)}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        >
-                          {isDone && <Text style={styles.questCheckmark}>{"\u2713"}</Text>}
-                        </TouchableOpacity>
-                        <View style={{ flex: 1 }}>
-                          <Text
-                            style={[styles.questName, { color: C.text }, isDone && { textDecorationLine: "line-through", color: C.textMuted }]}
-                            numberOfLines={1}
-                          >
-                            {quest ? loc(quest.name) : questId}
-                          </Text>
-                          {quest?.trader && (
-                            <Text style={[styles.questTrader, { color: C.textSecondary }]}>{quest.trader}</Text>
-                          )}
-                        </View>
-                        <TouchableOpacity
-                          onPress={() => removeMemberQuest(member.accountId, questId)}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        >
-                          <Text style={[styles.questRemove, { color: C.textMuted }]}>{"\u2715"}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    );
-                  })}
-
-                  {totalQuests === 0 && !isAddingForThis && (
-                    <Text style={[styles.noQuestsHint, { color: C.textMuted }]}>No quests tracked — tap + to add</Text>
-                  )}
-
-                  {/* Quest picker */}
-                  {isAddingForThis && (
-                    <View style={[styles.questPickerContainer, { borderColor: C.border }]}>
-                      <SearchBar value={questSearch} onChangeText={setQuestSearch} placeholder="Search quests..." />
-                      <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
-                        {availableQuests.slice(0, 20).map((q) => (
-                          <TouchableOpacity
-                            key={q.id}
-                            style={[styles.questPickerRow, { borderBottomColor: C.border }]}
-                            onPress={() => {
-                              addMemberQuest(member.accountId, q.id);
-                              setQuestSearch("");
-                            }}
-                          >
-                            <Text style={[styles.questPickerName, { color: C.text }]} numberOfLines={1}>{loc(q.name)}</Text>
-                            {q.trader && <Text style={[styles.questPickerTrader, { color: C.accent }]}>{q.trader}</Text>}
-                          </TouchableOpacity>
-                        ))}
-                        {availableQuests.length === 0 && (
-                          <Text style={[styles.noQuestsHint, { color: C.textMuted, paddingVertical: 8 }]}>No matching quests</Text>
-                        )}
-                      </ScrollView>
-                    </View>
-                  )}
-                </Panel>
-              );
-            })
-          )}
-
-          <View style={{ marginTop: 12 }}>
-            <TouchableOpacity
-              style={[styles.squadButton, { borderColor: C.red, backgroundColor: "transparent" }]}
-              onPress={() => { leaveSquad(); }}
-            >
-              <Text style={[styles.squadButtonText, { color: C.red }]}>Leave Squad</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      ) : (
-        <Panel>
-          <Text style={[styles.squadHint, { color: C.textMuted }]}>
-            Create or join a squad to coordinate loadouts and get role suggestions.
-          </Text>
-          <TouchableOpacity
-            style={[styles.squadButton, { borderColor: C.accent, backgroundColor: C.accentBg }]}
-            onPress={() => { createSquad(); }}
-          >
-            <Text style={[styles.squadButtonText, { color: C.accent }]}>Create Squad</Text>
-          </TouchableOpacity>
-
-          {!joinMode ? (
-            <TouchableOpacity
-              style={[styles.squadButton, styles.squadButtonSecondary, { borderColor: C.border }]}
-              onPress={() => setJoinMode(true)}
-            >
-              <Text style={[styles.squadButtonTextSecondary, { color: C.textSecondary }]}>Join Squad</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.joinRow}>
-              <TextInput
-                style={[styles.joinInput, { color: C.text, borderColor: C.border, backgroundColor: C.input }]}
-                value={joinCode}
-                onChangeText={setJoinCode}
-                placeholder="Paste squad code"
-                placeholderTextColor={C.textMuted}
-                autoCapitalize="characters"
-              />
-              <TouchableOpacity
-                style={[styles.joinConfirmButton, { borderColor: C.accent, backgroundColor: C.accentBg }]}
-                onPress={() => {
-                  // Join logic placeholder — would need backend
-                  setJoinMode(false);
-                  setJoinCode("");
-                }}
-              >
-                <Text style={[styles.squadButtonText, { color: C.accent }]}>Join</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.joinCancelButton, { borderColor: C.border }]}
-                onPress={() => { setJoinMode(false); setJoinCode(""); }}
-              >
-                <Text style={[styles.squadButtonTextSecondary, { color: C.textSecondary }]}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </Panel>
-      )}
-    </>
-  );
-
-  const renderSquadMember = () => {
-    const members = squad?.members ?? [];
-    const member = members.find((m) => m.accountId === selectedMember);
-    if (!member) return <EmptyState title="Member not found" />;
-
-    return (
-      <>
-        <BackHeader title="Squad" onBack={goBack} />
-        <Panel>
-          <View style={styles.memberDetailHeader}>
-            <View style={[styles.statusDotLarge, {
-              backgroundColor: member.isOnline ? C.statusOnline : C.statusOffline
-            }]} />
-            <Text style={[styles.detailTitle, { color: C.text }]}>{member.displayName}</Text>
-          </View>
-          {member.loadoutSummary && (
-            <Text style={[styles.memberLoadout, { color: C.textSecondary }]}>{member.loadoutSummary}</Text>
-          )}
-          {member.suggestedRole && (
-            <>
-              <Divider />
-              <Text style={[styles.subHeading, { color: C.textSecondary }]}>Suggested Role</Text>
-              <Text style={[styles.roleText, { color: C.accent }]}>{member.suggestedRole}</Text>
-            </>
-          )}
-        </Panel>
-
-        {/* Member's quests */}
-        {((member.activeQuestIds ?? []).length > 0 || (member.completedQuestIds ?? []).length > 0) && (
-          <>
-            <Text style={[styles.sectionTitle, { color: C.textSecondary, marginTop: 10 }]}>Quests</Text>
-            <Panel>
-              {[...(member.activeQuestIds ?? []), ...(member.completedQuestIds ?? []).filter((id) => !(member.activeQuestIds ?? []).includes(id))].map((questId) => {
-                const quest = allQuests.find((q) => q.id === questId);
-                const isDone = (member.completedQuestIds ?? []).includes(questId);
-                return (
-                  <View key={questId} style={styles.questRow}>
-                    <TouchableOpacity
-                      style={[styles.questCheckbox, { borderColor: C.borderAccent }, isDone && { backgroundColor: C.green, borderColor: C.green }]}
-                      onPress={() => toggleMemberQuest(member.accountId, questId)}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                    >
-                      {isDone && <Text style={styles.questCheckmark}>{"\u2713"}</Text>}
-                    </TouchableOpacity>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        style={[styles.questName, { color: C.text }, isDone && { textDecorationLine: "line-through", color: C.textMuted }]}
-                        numberOfLines={2}
-                      >
-                        {quest ? loc(quest.name) : questId}
-                      </Text>
-                      {quest?.trader && <Text style={[styles.questTrader, { color: C.textSecondary }]}>{quest.trader}</Text>}
-                    </View>
-                  </View>
-                );
-              })}
-            </Panel>
-          </>
-        )}
-      </>
-    );
-  };
-
-  const renderSettings = () => (
-    <>
-      <BackHeader title="More" onBack={goBack} />
-      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Language</Text>
-      <Panel>
-        <View style={styles.langGrid}>
-          {LANGUAGES.map((lang) => (
-            <TouchableOpacity
-              key={lang.code}
-              style={[styles.langPill, { borderColor: C.border }, language === lang.code && { borderColor: C.accent, backgroundColor: C.accentBg }]}
-              onPress={() => setLanguage(lang.code)}
-            >
-              <Text style={[styles.langText, { color: C.textSecondary }, language === lang.code && { color: C.accent }]}>
-                {lang.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <Text style={[styles.langHint, { color: C.textMuted }]}>
-          Affects game data (enemies, maps, quests). UI is English.
-        </Text>
-      </Panel>
-
-      <Divider />
-
-      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Theme</Text>
-      <Panel>
-        <View style={styles.volumeRow}>
-          {[
-            { label: "Clean", value: "clean" as const },
-            { label: "Tactical", value: "tactical" as const },
-          ].map((opt) => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[styles.volumePill, { borderColor: C.border }, theme === opt.value && { borderColor: C.accent, backgroundColor: C.accentBg }]}
-              onPress={() => setTheme(opt.value)}
-            >
-              <Text style={[styles.volumeText, { color: C.textSecondary }, theme === opt.value && { color: C.accent }]}>
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </Panel>
-
-      <Divider />
-
-      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Color Preset</Text>
-      <Panel>
-        <View style={styles.volumeRow}>
-          {[
-            { label: "Default", value: "default" as const },
-            { label: "Colorblind", value: "colorblind" as const },
-            { label: "High Contrast", value: "highContrast" as const },
-          ].map((opt) => (
-            <TouchableOpacity
-              key={opt.value}
-              style={[styles.volumePill, { borderColor: C.border }, preset === opt.value && { borderColor: C.accent, backgroundColor: C.accentBg }]}
-              onPress={() => setColorPreset(opt.value)}
-            >
-              <Text style={[styles.volumeText, { color: C.textSecondary }, preset === opt.value && { color: C.accent }]}>
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <Text style={[styles.langHint, { color: C.textMuted }]}>
-          Adjusts green/red indicators for accessibility
-        </Text>
-      </Panel>
-
-      {isDesktop && (
-        <>
-          <Divider />
-
-          <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Notifications</Text>
-          <Panel>
-            <View style={styles.toggleRow}>
-              <Text style={[styles.toggleLabel, { color: C.text }]}>Event Notifications</Text>
-              <Toggle value={alertSettings.notifyOnEvent} onToggle={() => updateAlertSettings({ notifyOnEvent: !alertSettings.notifyOnEvent })} size="small" />
-            </View>
-
-            <Divider />
-
-            <View style={styles.toggleRow}>
-              <Text style={[styles.toggleLabel, { color: C.text }]}>Audio Alerts</Text>
-              <Toggle value={alertSettings.audioAlerts} onToggle={() => updateAlertSettings({ audioAlerts: !alertSettings.audioAlerts })} size="small" />
-            </View>
-
-            {alertSettings.audioAlerts && (
-              <>
-                <Divider />
-                <Text style={[styles.volumeLabel, { color: C.textSecondary }]}>Volume</Text>
-                <View style={styles.volumeRow}>
-                  {[0.25, 0.5, 0.75, 1.0].map((vol) => (
-                    <TouchableOpacity
-                      key={vol}
-                      style={[
-                        styles.volumePill,
-                        { borderColor: C.border },
-                        alertSettings.audioVolume === vol && { borderColor: C.accent, backgroundColor: C.accentBg },
-                      ]}
-                      onPress={() => updateAlertSettings({ audioVolume: vol })}
-                    >
-                      <Text
-                        style={[
-                          styles.volumeText,
-                          { color: C.textSecondary },
-                          alertSettings.audioVolume === vol && { color: C.accent },
-                        ]}
-                      >
-                        {Math.round(vol * 100)}%
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            )}
-          </Panel>
-
-          <Divider />
-
-          <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Quest Auto-Tracker</Text>
-          <Panel>
-            <View style={styles.toggleRow}>
-              <Text style={[styles.toggleLabel, { color: C.text }]}>Auto-Track</Text>
-              <Toggle value={ocrSettings.enabled} onToggle={() => updateOCRSettings({ enabled: !ocrSettings.enabled })} size="small" />
-            </View>
-            <Text style={[styles.autoTrackDesc, { color: C.textMuted }]}>
-              Captures your game screen to auto-detect quest completion, item pickups, and kills
-            </Text>
-
-            {ocrSettings.enabled && (
-              <>
-                <Divider />
-                <Text style={[styles.volumeLabel, { color: C.textSecondary }]}>Capture Speed</Text>
-                <View style={styles.volumeRow}>
-                  {[
-                    { label: "Fast", ms: 1000 },
-                    { label: "Normal", ms: 1500 },
-                    { label: "Battery Saver", ms: 3000 },
-                  ].map((opt) => (
-                    <TouchableOpacity
-                      key={opt.ms}
-                      style={[
-                        styles.volumePill,
-                        { borderColor: C.border },
-                        ocrSettings.captureIntervalMs === opt.ms && { borderColor: C.accent, backgroundColor: C.accentBg },
-                      ]}
-                      onPress={() => updateOCRSettings({ captureIntervalMs: opt.ms })}
-                    >
-                      <Text
-                        style={[
-                          styles.volumeText,
-                          { color: C.textSecondary },
-                          ocrSettings.captureIntervalMs === opt.ms && { color: C.accent },
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Divider />
-                <Text style={[styles.volumeLabel, { color: C.textSecondary }]}>Match Sensitivity</Text>
-                <View style={styles.volumeRow}>
-                  {[
-                    { label: "Strict", val: 0.85 },
-                    { label: "Normal", val: 0.7 },
-                    { label: "Loose", val: 0.55 },
-                  ].map((opt) => (
-                    <TouchableOpacity
-                      key={opt.val}
-                      style={[
-                        styles.volumePill,
-                        { borderColor: C.border },
-                        ocrSettings.matchThreshold === opt.val && { borderColor: C.accent, backgroundColor: C.accentBg },
-                      ]}
-                      onPress={() => updateOCRSettings({ matchThreshold: opt.val })}
-                    >
-                      <Text
-                        style={[
-                          styles.volumeText,
-                          { color: C.textSecondary },
-                          ocrSettings.matchThreshold === opt.val && { color: C.accent },
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <Divider />
-                <Text style={[styles.volumeLabel, { color: C.textSecondary }]}>Active Zones</Text>
-                {[
-                  { id: "objectiveComplete", label: "Objective Complete (top-center)" },
-                  { id: "itemPickup", label: "Item Pickup (lower-right)" },
-                  { id: "killFeed", label: "Kill Feed (upper-right)" },
-                  { id: "centerPopup", label: "Center Popup" },
-                ].map((zone) => {
-                  const active = ocrSettings.activeZones.includes(zone.id);
-                  return (
-                    <View key={zone.id} style={styles.toggleRow}>
-                      <Text style={[styles.zoneLabel, { color: C.text }]}>{zone.label}</Text>
-                      <Toggle
-                        value={active}
-                        onToggle={() => {
-                          const zones = active
-                            ? ocrSettings.activeZones.filter((z) => z !== zone.id)
-                            : [...ocrSettings.activeZones, zone.id];
-                          updateOCRSettings({ activeZones: zones });
-                        }}
-                        size="small"
-                      />
-                    </View>
-                  );
-                })}
-
-                <Divider />
-                <TouchableOpacity
-                  style={[styles.testButton, { borderColor: C.borderAccent, backgroundColor: C.accentBg }]}
-                  onPress={async () => {
-                    setTestResult("Capturing...");
-                    const result = await window.arcDesktop?.testOCRCapture?.();
-                    if (result) {
-                      setTestResult(
-                        JSON.stringify({
-                          screen: `${result.screenWidth}x${result.screenHeight}`,
-                          zones: result.zones.map((z: any) => ({ zone: z.zone, size: `${z.width}x${z.height}` })),
-                        })
-                      );
-                    } else {
-                      setTestResult("Capture failed \u2014 is the game running?");
-                    }
-                  }}
-                >
-                  <Text style={[styles.testButtonText, { color: C.accent }]}>Test Capture</Text>
-                </TouchableOpacity>
-                {testResult && testResult !== "Capturing..." && testResult.startsWith("{") ? (
-                  (() => {
-                    try {
-                      const data = JSON.parse(testResult);
-                      return (
-                        <Panel style={{ marginTop: 8 }}>
-                          <View style={styles.testResultRow}>
-                            <Text style={[styles.testResultLabel, { color: C.textSecondary }]}>Screen</Text>
-                            <Text style={[styles.testResultValue, { color: C.text }]}>{data.screen}</Text>
-                          </View>
-                          {data.zones?.map((z: any, i: number) => (
-                            <View key={i} style={styles.testResultRow}>
-                              <Text style={[styles.testResultLabel, { color: C.textSecondary }]}>{z.zone}</Text>
-                              <Text style={[styles.testResultValue, { color: C.text }]}>{z.size}</Text>
-                            </View>
-                          ))}
-                        </Panel>
-                      );
-                    } catch {
-                      return <Text style={[styles.testResultText, { color: C.textSecondary }]}>{testResult}</Text>;
-                    }
-                  })()
-                ) : testResult ? (
-                  <Text style={[styles.testResultText, { color: C.textSecondary }]}>{testResult}</Text>
-                ) : null}
-              </>
-            )}
-          </Panel>
-        </>
-      )}
-
-      {isDesktop && (
-        <>
-          <Divider />
-          <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Window Size</Text>
-          <Panel>
-            <View style={styles.volumeRow}>
-              {[
-                { label: "Default", preset: "default" as const },
-                { label: "Large", preset: "large" as const },
-                { label: "XL", preset: "xl" as const },
-              ].map((opt) => (
-                <TouchableOpacity
-                  key={opt.preset}
-                  style={[styles.volumePill, { borderColor: C.border }]}
-                  onPress={() => window.arcDesktop?.windowSetSize(opt.preset)}
-                >
-                  <Text style={[styles.volumeText, { color: C.textSecondary }]}>{opt.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </Panel>
-        </>
-      )}
-
-      <Divider />
-
-      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Data</Text>
-      <TouchableOpacity
-        onPress={() => {
-          clearAllCaches();
-          setCacheStatus("Caches cleared!");
-          setTimeout(() => setCacheStatus(null), 3000);
-        }}
-        activeOpacity={0.7}
-      >
-        <Panel>
-          <Text style={[styles.cacheButton, { color: C.amber }]}>Clear All Caches</Text>
-          <Text style={[styles.cacheHint, { color: C.textMuted }]}>Forces fresh data on next load (15-min TTL)</Text>
-        </Panel>
-      </TouchableOpacity>
-      {cacheStatus && (
-        <Text style={[styles.cacheStatusText, { color: C.green }]}>{cacheStatus}</Text>
-      )}
-
-      <Divider />
-
-      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Settings Backup</Text>
-      <Panel>
-        <TouchableOpacity
-          style={[styles.testButton, { borderColor: C.borderAccent, backgroundColor: C.accentBg }]}
-          onPress={async () => {
-            try {
-              const json = await exportSettings();
-              if (typeof navigator !== "undefined" && navigator.clipboard) {
-                await navigator.clipboard.writeText(json);
-                setExportStatus("Copied to clipboard!");
-              } else {
-                setExportStatus("Export ready (check console)");
-                console.log(json);
-              }
-            } catch (e) {
-              setExportStatus("Export failed");
-            }
-            setTimeout(() => setExportStatus(null), 3000);
-          }}
-        >
-          <Text style={[styles.testButtonText, { color: C.accent }]}>Export Settings to Clipboard</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.testButton, { marginTop: 6, borderColor: C.borderAccent, backgroundColor: C.accentBg }]}
-          onPress={async () => {
-            try {
-              if (typeof navigator !== "undefined" && navigator.clipboard) {
-                const json = await navigator.clipboard.readText();
-                const count = await importSettings(json);
-                setExportStatus(`Imported ${count} settings \u2014 reload to apply`);
-              } else {
-                setExportStatus("Clipboard not available");
-              }
-            } catch {
-              setExportStatus("Invalid settings data");
-            }
-            setTimeout(() => setExportStatus(null), 4000);
-          }}
-        >
-          <Text style={[styles.testButtonText, { color: C.accent }]}>Import Settings from Clipboard</Text>
-        </TouchableOpacity>
-        {exportStatus && (
-          <Text style={[styles.testResultText, { color: C.textSecondary }]}>{exportStatus}</Text>
-        )}
-      </Panel>
-
-      {__DEV__ && (
-        <>
-          <Divider />
-          <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Developer</Text>
-          <TouchableOpacity
-            onPress={() => {
-              const { DevSettings } = require("react-native");
-              DevSettings?.reload?.();
-            }}
-            activeOpacity={0.7}
-          >
-            <Panel>
-              <Text style={[styles.devButton, { color: C.accent }]}>Reload App</Text>
-            </Panel>
-          </TouchableOpacity>
-        </>
-      )}
-    </>
-  );
-
-  const renderAbout = () => (
-    <>
-      <BackHeader title="More" onBack={goBack} />
-      <Panel>
-        <Text style={[styles.appName, { color: C.accent }]}>ARC View</Text>
-        <Text style={[styles.appVersion, { color: C.textSecondary }]}>v0.2.0</Text>
-        <Text style={[styles.appDev, { color: C.textMuted }]}>by Couloir</Text>
-        <Text style={[styles.appDesc, { color: C.text }]}>
-          Arc Raiders companion — intel, loadouts, market, missions, and squad coordination.
-        </Text>
-      </Panel>
-
-      <Divider />
-
-      <Text style={[styles.sectionTitle, { color: C.textSecondary }]}>Data Sources</Text>
-      {DATA_SOURCES.map((src) => (
-        <TouchableOpacity
-          key={src.name}
-          onPress={() => Linking.openURL(src.url)}
-          activeOpacity={0.7}
-        >
-          <Panel style={styles.sourceCard}>
-            <Text style={[styles.sourceName, { color: C.text }]}>{src.name}</Text>
-            <Text style={[styles.sourceDesc, { color: C.textSecondary }]}>{src.description}</Text>
-            <Text style={[styles.sourceUrl, { color: C.accent }]}>{src.url}</Text>
-          </Panel>
-        </TouchableOpacity>
-      ))}
-    </>
+  // ─── Section Header ──────────────────────────────────────────
+  const SectionHeader = ({ label, icon, sectionKey }: { label: string; icon: string; sectionKey: SectionKey }) => (
+    <TouchableOpacity
+      onPress={() => toggleExpand(sectionKey)}
+      style={[styles.sectionHeader, { borderColor: C.border }]}
+      activeOpacity={0.7}
+    >
+      <Text style={styles.sectionIcon}>{icon}</Text>
+      <Text style={[styles.sectionLabel, { color: C.text }]}>{label}</Text>
+      <Text style={[styles.chevron, { color: C.textMuted }]}>
+        {expanded[sectionKey] ? "\u25B4" : "\u25BE"}
+      </Text>
+    </TouchableOpacity>
   );
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: C.bg }]}>
       <Text style={[styles.header, { color: C.text }]}>More</Text>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {viewMode === "menu" && renderMenu()}
-        {viewMode === "account" && renderAccount()}
-        {viewMode === "squad" && renderSquad()}
-        {viewMode === "squadMember" && renderSquadMember()}
-        {viewMode === "settings" && renderSettings()}
-        {viewMode === "about" && renderAbout()}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+
+        {/* ═══ ACCOUNT ═══ */}
+        <SectionHeader label="Account" icon={"\ud83d\udc64"} sectionKey="account" />
+        {expanded.account && (
+          <Panel style={styles.sectionBody}>
+            <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Account ID</Text>
+            <TextInput
+              style={[styles.fieldInput, { color: C.text, borderColor: C.border, backgroundColor: C.input }]}
+              value={accountId}
+              onChangeText={handleAccountIdChange}
+              placeholder="Enter your account ID"
+              placeholderTextColor={C.textMuted}
+            />
+            <View style={styles.fieldRow}>
+              <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Sync</Text>
+              <Text style={[styles.fieldValue, { color: C.accent }]}>Local Storage</Text>
+            </View>
+          </Panel>
+        )}
+
+        {/* ═══ SQUAD ═══ */}
+        <SectionHeader label="Squad" icon={"\ud83d\udc65"} sectionKey="squad" />
+        {expanded.squad && (
+          <>
+            {squad ? (
+              <>
+                {/* Squad code */}
+                <Panel variant="glow" style={styles.sectionBody}>
+                  <View style={styles.codeRow}>
+                    <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Code</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (typeof navigator !== "undefined" && navigator.clipboard) {
+                          navigator.clipboard.writeText(squad.code);
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.squadCode, { color: C.accent }]}>{squad.code}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </Panel>
+
+                {/* Members + fast loadout */}
+                {squad.members.length > 0 ? (
+                  squad.members.map((member) => {
+                    const isLoadoutTarget = loadoutTarget?.accountId === member.accountId;
+
+                    return (
+                      <Panel key={member.accountId} style={styles.memberPanel}>
+                        <View style={styles.memberRow}>
+                          <View style={[styles.statusDot, { backgroundColor: member.isOnline ? C.statusOnline : C.statusOffline }]} />
+                          <Text style={[styles.memberName, { color: C.text }]}>{member.displayName}</Text>
+                          {member.suggestedRole && (
+                            <Text style={[styles.memberRole, { color: C.accent }]}>{member.suggestedRole}</Text>
+                          )}
+                        </View>
+
+                        {/* Gear slots — tap to quick-assign */}
+                        <View style={styles.gearRow}>
+                          {GEAR_SLOTS.map((slot) => {
+                            const value = member[slot] || "--";
+                            const isActive = isLoadoutTarget && loadoutTarget?.slot === slot;
+                            return (
+                              <TouchableOpacity
+                                key={slot}
+                                style={[
+                                  styles.gearSlot,
+                                  { borderColor: C.border },
+                                  isActive && { borderColor: C.accent, backgroundColor: C.accentBg },
+                                ]}
+                                onPress={() => {
+                                  if (isActive) {
+                                    setLoadoutTarget(null);
+                                    setLoadoutSearch("");
+                                  } else {
+                                    setLoadoutTarget({ accountId: member.accountId, slot });
+                                    setLoadoutSearch("");
+                                  }
+                                }}
+                                activeOpacity={0.6}
+                              >
+                                <Text style={[styles.gearSlotLabel, { color: isActive ? C.accent : C.textMuted }]}>
+                                  {slot.charAt(0).toUpperCase() + slot.slice(1, 3)}
+                                </Text>
+                                <Text
+                                  style={[styles.gearSlotValue, { color: value === "--" ? C.textMuted : C.text }]}
+                                  numberOfLines={1}
+                                >
+                                  {value}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+
+                        {/* Fast loadout search when a slot is selected */}
+                        {isLoadoutTarget && (
+                          <View style={styles.loadoutSearchWrap}>
+                            <SearchBar
+                              value={loadoutSearch}
+                              onChangeText={setLoadoutSearch}
+                              placeholder={`Search ${loadoutTarget!.slot}...`}
+                              results={loadoutResults}
+                              onSelect={handleLoadoutSelect}
+                              autoFocus
+                            />
+                          </View>
+                        )}
+                      </Panel>
+                    );
+                  })
+                ) : (
+                  <EmptyState icon={"\ud83d\udc65"} title="No members yet" hint="Share the squad code" />
+                )}
+
+                {/* Role gaps */}
+                {roleAdvisory && roleAdvisory.gaps.length > 0 && (
+                  <Panel style={styles.sectionBody}>
+                    <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Role Gaps</Text>
+                    {roleAdvisory.gaps.map((gap, i) => (
+                      <Text key={i} style={[styles.gapText, { color: C.amber }]}>{gap}</Text>
+                    ))}
+                  </Panel>
+                )}
+
+                {/* Quest Board */}
+                {squad.members.length > 0 && (
+                  <>
+                    <Text style={[styles.subTitle, { color: C.textSecondary }]}>Quest Board</Text>
+                    {squad.members.map((member) => {
+                      const active = member.activeQuestIds ?? [];
+                      const completed = member.completedQuestIds ?? [];
+                      const isAddingForThis = addQuestForMember === member.accountId;
+                      const questMap = new Map<string, RaidTheoryQuest>();
+                      allQuests.forEach((q) => questMap.set(q.id, q));
+
+                      return (
+                        <Panel key={member.accountId} style={styles.memberPanel}>
+                          <View style={styles.questMemberHeader}>
+                            <View style={[styles.statusDot, { backgroundColor: member.isOnline ? C.statusOnline : C.statusOffline }]} />
+                            <Text style={[styles.memberName, { color: C.text, flex: 1 }]}>{member.displayName}</Text>
+                            <Text style={[styles.questCount, { color: active.length > 0 ? C.accent : C.textMuted }]}>
+                              {completed.length}/{active.length}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => setAddQuestForMember(isAddingForThis ? null : member.accountId)}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <Text style={[styles.addQuestIcon, { color: C.accent }]}>{isAddingForThis ? "\u2212" : "+"}</Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          {[...active, ...completed.filter((id) => !active.includes(id))].map((questId) => {
+                            const quest = questMap.get(questId);
+                            const isDone = completed.includes(questId);
+                            return (
+                              <View key={questId} style={styles.questRow}>
+                                <TouchableOpacity
+                                  style={[styles.questCheckbox, { borderColor: C.borderAccent }, isDone && { backgroundColor: C.green, borderColor: C.green }]}
+                                  onPress={() => toggleMemberQuest(member.accountId, questId)}
+                                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                >
+                                  {isDone && <Text style={styles.questCheckmark}>{"\u2713"}</Text>}
+                                </TouchableOpacity>
+                                <Text
+                                  style={[styles.questName, { color: C.text }, isDone && { textDecorationLine: "line-through", color: C.textMuted }]}
+                                  numberOfLines={1}
+                                >
+                                  {quest ? loc(quest.name) : questId}
+                                </Text>
+                                <TouchableOpacity
+                                  onPress={() => removeMemberQuest(member.accountId, questId)}
+                                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                >
+                                  <Text style={[styles.questRemove, { color: C.textMuted }]}>{"\u2715"}</Text>
+                                </TouchableOpacity>
+                              </View>
+                            );
+                          })}
+
+                          {active.length === 0 && completed.length === 0 && !isAddingForThis && (
+                            <Text style={[styles.hintText, { color: C.textMuted }]}>No quests — tap +</Text>
+                          )}
+
+                          {isAddingForThis && (
+                            <View style={[styles.questPickerWrap, { borderColor: C.border }]}>
+                              <SearchBar
+                                value={questSearch}
+                                onChangeText={setQuestSearch}
+                                placeholder="Search quests..."
+                                results={questResults}
+                                onSelect={(result) => {
+                                  addMemberQuest(member.accountId, result.id);
+                                  setQuestSearch("");
+                                }}
+                                autoFocus
+                              />
+                            </View>
+                          )}
+                        </Panel>
+                      );
+                    })}
+                  </>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.dangerBtn, { borderColor: C.red }]}
+                  onPress={leaveSquad}
+                >
+                  <Text style={[styles.dangerBtnText, { color: C.red }]}>Leave Squad</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Panel style={styles.sectionBody}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                  onPress={createSquad}
+                >
+                  <Text style={[styles.actionBtnText, { color: C.accent }]}>Create Squad</Text>
+                </TouchableOpacity>
+
+                {!joinMode ? (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { borderColor: C.border, marginTop: 4 }]}
+                    onPress={() => setJoinMode(true)}
+                  >
+                    <Text style={[styles.actionBtnText, { color: C.textSecondary }]}>Join Squad</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.joinRow}>
+                    <TextInput
+                      style={[styles.joinInput, { color: C.text, borderColor: C.border, backgroundColor: C.input }]}
+                      value={joinCode}
+                      onChangeText={setJoinCode}
+                      placeholder="Paste code"
+                      placeholderTextColor={C.textMuted}
+                      autoCapitalize="characters"
+                    />
+                    <TouchableOpacity
+                      style={[styles.joinBtn, { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                      onPress={() => { setJoinMode(false); setJoinCode(""); }}
+                    >
+                      <Text style={[styles.actionBtnText, { color: C.accent }]}>Join</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.joinBtn, { borderColor: C.border }]}
+                      onPress={() => { setJoinMode(false); setJoinCode(""); }}
+                    >
+                      <Text style={[styles.actionBtnText, { color: C.textSecondary }]}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </Panel>
+            )}
+          </>
+        )}
+
+        {/* ═══ SETTINGS ═══ */}
+        <SectionHeader label="Settings" icon={"\u2699"} sectionKey="settings" />
+        {expanded.settings && (
+          <>
+            {/* Language */}
+            <Panel style={styles.sectionBody}>
+              <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Language</Text>
+              <View style={styles.pillRow}>
+                {LANGUAGES.map((lang) => (
+                  <TouchableOpacity
+                    key={lang.code}
+                    style={[styles.pill, { borderColor: C.border }, language === lang.code && { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                    onPress={() => setLanguage(lang.code)}
+                  >
+                    <Text style={[styles.pillText, { color: C.textSecondary }, language === lang.code && { color: C.accent }]}>{lang.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </Panel>
+
+            {/* Theme + Preset */}
+            <Panel style={styles.sectionBody}>
+              <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Theme</Text>
+              <View style={styles.pillRow}>
+                {([{ label: "Clean", value: "clean" as const }, { label: "Tactical", value: "tactical" as const }]).map((opt) => (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.pill, { borderColor: C.border }, theme === opt.value && { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                    onPress={() => setTheme(opt.value)}
+                  >
+                    <Text style={[styles.pillText, { color: C.textSecondary }, theme === opt.value && { color: C.accent }]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={[styles.fieldLabel, { color: C.textSecondary, marginTop: 6 }]}>Color Preset</Text>
+              <View style={styles.pillRow}>
+                {([{ label: "Default", value: "default" as const }, { label: "Colorblind", value: "colorblind" as const }, { label: "High Contrast", value: "highContrast" as const }]).map((opt) => (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.pill, { borderColor: C.border }, preset === opt.value && { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                    onPress={() => setColorPreset(opt.value)}
+                  >
+                    <Text style={[styles.pillText, { color: C.textSecondary }, preset === opt.value && { color: C.accent }]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </Panel>
+
+            {/* Desktop-only: Notifications + OCR */}
+            {isDesktop && (
+              <>
+                <Panel style={styles.sectionBody}>
+                  <View style={styles.toggleRow}>
+                    <Text style={[styles.toggleLabel, { color: C.text }]}>Event Notifications</Text>
+                    <Toggle value={alertSettings.notifyOnEvent} onToggle={() => updateAlertSettings({ notifyOnEvent: !alertSettings.notifyOnEvent })} size="small" />
+                  </View>
+                  <View style={styles.toggleRow}>
+                    <Text style={[styles.toggleLabel, { color: C.text }]}>Audio Alerts</Text>
+                    <Toggle value={alertSettings.audioAlerts} onToggle={() => updateAlertSettings({ audioAlerts: !alertSettings.audioAlerts })} size="small" />
+                  </View>
+                  {alertSettings.audioAlerts && (
+                    <>
+                      <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Volume</Text>
+                      <View style={styles.pillRow}>
+                        {[0.25, 0.5, 0.75, 1.0].map((vol) => (
+                          <TouchableOpacity
+                            key={vol}
+                            style={[styles.pill, { borderColor: C.border }, alertSettings.audioVolume === vol && { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                            onPress={() => updateAlertSettings({ audioVolume: vol })}
+                          >
+                            <Text style={[styles.pillText, { color: C.textSecondary }, alertSettings.audioVolume === vol && { color: C.accent }]}>{Math.round(vol * 100)}%</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </>
+                  )}
+                </Panel>
+
+                <Panel style={styles.sectionBody}>
+                  <View style={styles.toggleRow}>
+                    <Text style={[styles.toggleLabel, { color: C.text }]}>Quest Auto-Tracker</Text>
+                    <Toggle value={ocrSettings.enabled} onToggle={() => updateOCRSettings({ enabled: !ocrSettings.enabled })} size="small" />
+                  </View>
+                  {ocrSettings.enabled && (
+                    <>
+                      <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Capture Speed</Text>
+                      <View style={styles.pillRow}>
+                        {[{ label: "Fast", ms: 1000 }, { label: "Normal", ms: 1500 }, { label: "Battery", ms: 3000 }].map((opt) => (
+                          <TouchableOpacity
+                            key={opt.ms}
+                            style={[styles.pill, { borderColor: C.border }, ocrSettings.captureIntervalMs === opt.ms && { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                            onPress={() => updateOCRSettings({ captureIntervalMs: opt.ms })}
+                          >
+                            <Text style={[styles.pillText, { color: C.textSecondary }, ocrSettings.captureIntervalMs === opt.ms && { color: C.accent }]}>{opt.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Match Sensitivity</Text>
+                      <View style={styles.pillRow}>
+                        {[{ label: "Strict", val: 0.85 }, { label: "Normal", val: 0.7 }, { label: "Loose", val: 0.55 }].map((opt) => (
+                          <TouchableOpacity
+                            key={opt.val}
+                            style={[styles.pill, { borderColor: C.border }, ocrSettings.matchThreshold === opt.val && { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                            onPress={() => updateOCRSettings({ matchThreshold: opt.val })}
+                          >
+                            <Text style={[styles.pillText, { color: C.textSecondary }, ocrSettings.matchThreshold === opt.val && { color: C.accent }]}>{opt.label}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Active Zones</Text>
+                      {[
+                        { id: "objectiveComplete", label: "Objective Complete" },
+                        { id: "itemPickup", label: "Item Pickup" },
+                        { id: "killFeed", label: "Kill Feed" },
+                        { id: "centerPopup", label: "Center Popup" },
+                      ].map((zone) => {
+                        const active = ocrSettings.activeZones.includes(zone.id);
+                        return (
+                          <View key={zone.id} style={styles.toggleRow}>
+                            <Text style={[styles.zoneLabel, { color: C.text }]}>{zone.label}</Text>
+                            <Toggle
+                              value={active}
+                              onToggle={() => {
+                                const zones = active
+                                  ? ocrSettings.activeZones.filter((z) => z !== zone.id)
+                                  : [...ocrSettings.activeZones, zone.id];
+                                updateOCRSettings({ activeZones: zones });
+                              }}
+                              size="small"
+                            />
+                          </View>
+                        );
+                      })}
+
+                      <TouchableOpacity
+                        style={[styles.actionBtn, { borderColor: C.borderAccent, backgroundColor: C.accentBg, marginTop: 4 }]}
+                        onPress={async () => {
+                          setTestResult("Capturing...");
+                          const result = await window.arcDesktop?.testOCRCapture?.();
+                          if (result) {
+                            setTestResult(`Screen: ${result.screenWidth}x${result.screenHeight} | ${result.zones.length} zones`);
+                          } else {
+                            setTestResult("Capture failed");
+                          }
+                        }}
+                      >
+                        <Text style={[styles.actionBtnText, { color: C.accent }]}>Test Capture</Text>
+                      </TouchableOpacity>
+                      {testResult && <Text style={[styles.hintText, { color: C.textSecondary }]}>{testResult}</Text>}
+
+                      {/* Debug log */}
+                      <TouchableOpacity
+                        style={styles.debugToggle}
+                        onPress={() => setDebugLogExpanded(!debugLogExpanded)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.fieldLabel, { color: C.textSecondary, flex: 1 }]}>OCR Debug Log</Text>
+                        <Text style={{ color: C.textMuted, fontSize: 12 }}>{debugLogExpanded ? "\u25B4" : "\u25BE"}</Text>
+                      </TouchableOpacity>
+
+                      {debugLogExpanded && (
+                        <View>
+                          <View style={styles.debugActions}>
+                            <TouchableOpacity
+                              style={[styles.smallBtn, { borderColor: C.border }]}
+                              onPress={() => { window.arcDesktop?.clearOCRDebugLog?.(); setDebugLogEntries([]); }}
+                            >
+                              <Text style={{ color: C.red, fontSize: 11, fontWeight: "600" }}>Clear</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.smallBtn, { borderColor: C.border }]}
+                              onPress={async () => {
+                                const logPath = await window.arcDesktop?.getOCRLogPath?.();
+                                if (logPath) Linking.openURL("file://" + logPath);
+                              }}
+                            >
+                              <Text style={{ color: C.accent, fontSize: 11, fontWeight: "600" }}>Open File</Text>
+                            </TouchableOpacity>
+                          </View>
+                          <ScrollView style={styles.debugScroll} nestedScrollEnabled>
+                            {debugLogEntries.length === 0 ? (
+                              <Text style={[styles.hintText, { color: C.textMuted }]}>No results yet</Text>
+                            ) : (
+                              debugLogEntries.map((entry, i) => (
+                                <View key={i} style={[styles.debugRow, entry.empty && { opacity: 0.4 }]}>
+                                  <Text style={[styles.debugTime, { color: C.textMuted }]}>{entry.time}</Text>
+                                  <Text style={[styles.debugZone, { color: C.accent }]}>{entry.zone}</Text>
+                                  <Text style={[styles.debugConf, { color: entry.confidence >= 70 ? C.green : entry.confidence >= 40 ? C.amber : C.red }]}>{entry.confidence}%</Text>
+                                  <Text style={[styles.debugText, { color: C.text }]} numberOfLines={1}>{entry.text || "(empty)"}</Text>
+                                </View>
+                              ))
+                            )}
+                          </ScrollView>
+                        </View>
+                      )}
+                    </>
+                  )}
+                </Panel>
+
+                {/* Window Size */}
+                <Panel style={styles.sectionBody}>
+                  <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Window Size</Text>
+                  <View style={styles.pillRow}>
+                    {[{ label: "Default", preset: "default" as const }, { label: "Large", preset: "large" as const }, { label: "XL", preset: "xl" as const }].map((opt) => (
+                      <TouchableOpacity
+                        key={opt.preset}
+                        style={[styles.pill, { borderColor: C.border }]}
+                        onPress={() => window.arcDesktop?.windowSetSize(opt.preset)}
+                      >
+                        <Text style={[styles.pillText, { color: C.textSecondary }]}>{opt.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </Panel>
+              </>
+            )}
+
+            {/* Data + Backup */}
+            <Panel style={styles.sectionBody}>
+              <TouchableOpacity onPress={() => { clearAllCaches(); setCacheStatus("Cleared!"); setTimeout(() => setCacheStatus(null), 3000); }}>
+                <Text style={{ color: C.amber, fontSize: 13, fontWeight: "600" }}>Clear All Caches</Text>
+              </TouchableOpacity>
+              {cacheStatus && <Text style={[styles.hintText, { color: C.green }]}>{cacheStatus}</Text>}
+              <Divider />
+              <View style={styles.backupRow}>
+                <TouchableOpacity
+                  style={[styles.smallBtn, { borderColor: C.borderAccent, backgroundColor: C.accentBg }]}
+                  onPress={async () => {
+                    try {
+                      const json = await exportSettings();
+                      if (navigator?.clipboard) { await navigator.clipboard.writeText(json); setExportStatus("Copied!"); }
+                    } catch { setExportStatus("Failed"); }
+                    setTimeout(() => setExportStatus(null), 3000);
+                  }}
+                >
+                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: "700" }}>Export</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.smallBtn, { borderColor: C.borderAccent, backgroundColor: C.accentBg }]}
+                  onPress={async () => {
+                    try {
+                      if (navigator?.clipboard) {
+                        const json = await navigator.clipboard.readText();
+                        const count = await importSettings(json);
+                        setExportStatus(`Imported ${count} — reload to apply`);
+                      }
+                    } catch { setExportStatus("Invalid data"); }
+                    setTimeout(() => setExportStatus(null), 4000);
+                  }}
+                >
+                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: "700" }}>Import</Text>
+                </TouchableOpacity>
+              </View>
+              {exportStatus && <Text style={[styles.hintText, { color: C.textSecondary }]}>{exportStatus}</Text>}
+            </Panel>
+          </>
+        )}
+
+        {/* ═══ ABOUT ═══ */}
+        <SectionHeader label="About" icon={"\u2139"} sectionKey="about" />
+        {expanded.about && (
+          <>
+            <Panel style={styles.sectionBody}>
+              <Text style={[styles.appName, { color: C.accent }]}>ARC View</Text>
+              <Text style={[styles.hintText, { color: C.textSecondary }]}>v0.2.0 by Couloir</Text>
+            </Panel>
+            {DATA_SOURCES.map((src) => (
+              <TouchableOpacity key={src.name} onPress={() => Linking.openURL(src.url)} activeOpacity={0.7}>
+                <Panel style={styles.memberPanel}>
+                  <Text style={[styles.memberName, { color: C.text }]}>{src.name}</Text>
+                  <Text style={[styles.hintText, { color: C.textSecondary }]}>{src.description}</Text>
+                </Panel>
+              </TouchableOpacity>
+            ))}
+          </>
+        )}
+
+        <View style={{ height: 12 }} />
       </ScrollView>
     </View>
   );
@@ -904,102 +754,98 @@ export default function MoreScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    fontSize: 20,
-    fontWeight: "700",
-    paddingHorizontal: 10,
-    paddingTop: 6,
-    paddingBottom: 2,
-  },
+  header: { fontSize: 18, fontWeight: "700", paddingHorizontal: 8, paddingTop: 4, paddingBottom: 2 },
   scroll: { flex: 1 },
-  scrollContent: { padding: 8, paddingBottom: 12 },
-  sectionTitle: { fontSize: 13, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 },
-  subHeading: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 4 },
-  menuItem: { marginBottom: 4 },
-  menuRow: { flexDirection: "row", alignItems: "center" },
-  menuIcon: { fontSize: 18, marginRight: 8 },
-  menuLabel: { flex: 1, fontSize: 16, fontWeight: "600" },
-  chevron: { fontSize: 24 },
-  detailTitle: { fontSize: 18, fontWeight: "700" },
-  accountLabel: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
-  accountValue: { fontSize: 15, fontWeight: "600", marginTop: 2, marginBottom: 8 },
-  accountHint: { fontSize: 12, marginTop: 4, lineHeight: 16 },
-  accountInput: {
-    fontSize: 15,
-    fontWeight: "600",
-    marginTop: 4,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+  scrollContent: { padding: 6, paddingBottom: 8 },
+
+  // ─── Section Headers ──────────────────────────────────────────
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    marginTop: 2,
   },
-  squadCodeLabel: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
-  squadCode: { fontSize: 24, fontWeight: "700", marginTop: 4, textAlign: "center", letterSpacing: 4 },
-  squadHint: { fontSize: 12, textAlign: "center", marginTop: 4, marginBottom: 8 },
-  squadButton: { borderWidth: 1, borderRadius: 6, padding: 8, alignItems: "center", marginBottom: 6 },
-  squadButtonSecondary: { backgroundColor: "transparent" },
-  squadButtonText: { fontSize: 14, fontWeight: "700" },
-  squadButtonTextSecondary: { fontSize: 14, fontWeight: "700" },
-  memberCard: { marginBottom: 6 },
+  sectionIcon: { fontSize: 16, marginRight: 8 },
+  sectionLabel: { flex: 1, fontSize: 15, fontWeight: "700" },
+  chevron: { fontSize: 14 },
+  sectionBody: { marginBottom: 4 },
+  subTitle: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1, marginTop: 8, marginBottom: 4, paddingHorizontal: 4 },
+
+  // ─── Fields ───────────────────────────────────────────────────
+  fieldLabel: { fontSize: 10, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
+  fieldValue: { fontSize: 13, fontWeight: "600" },
+  fieldInput: { fontSize: 13, fontWeight: "600", marginTop: 2, marginBottom: 4, borderWidth: 1, borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4 },
+  fieldRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 },
+
+  // ─── Squad ────────────────────────────────────────────────────
+  codeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  squadCode: { fontSize: 20, fontWeight: "700", letterSpacing: 4 },
+  memberPanel: { marginBottom: 4 },
   memberRow: { flexDirection: "row", alignItems: "center" },
-  statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 10 },
-  statusDotLarge: { width: 12, height: 12, borderRadius: 6, marginRight: 12 },
-  memberInfo: { flex: 1 },
-  memberName: { fontSize: 14, fontWeight: "600" },
-  memberLoadout: { fontSize: 12, marginTop: 2 },
-  memberRole: { fontSize: 11, fontWeight: "700", marginRight: 8 },
-  memberDetailHeader: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-  roleText: { fontSize: 15, fontWeight: "600" },
-  roleGapText: { fontSize: 12, fontWeight: "500", marginBottom: 4 },
-  langGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  langPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1 },
-  langText: { fontSize: 12, fontWeight: "600" },
-  langHint: { fontSize: 11, marginTop: 8 },
-  cacheButton: { fontSize: 14, fontWeight: "600", textAlign: "center" },
-  cacheHint: { fontSize: 11, textAlign: "center", marginTop: 4 },
-  cacheStatusText: { fontSize: 12, fontWeight: "600", textAlign: "center", marginTop: 6 },
-  devButton: { fontSize: 14, fontWeight: "600", textAlign: "center" },
-  appName: { fontSize: 24, fontWeight: "700", textAlign: "center" },
-  appVersion: { fontSize: 13, textAlign: "center", marginTop: 2 },
-  appDev: { fontSize: 13, textAlign: "center", marginTop: 2 },
-  appDesc: { fontSize: 13, textAlign: "center", marginTop: 8, lineHeight: 18 },
-  sourceCard: { marginBottom: 8 },
-  sourceName: { fontSize: 15, fontWeight: "700" },
-  sourceDesc: { fontSize: 12, marginTop: 2 },
-  sourceUrl: { fontSize: 11, marginTop: 4 },
-  toggleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 8 },
-  toggleLabel: { fontSize: 14, fontWeight: "600" },
-  toggleValue: { fontSize: 13, fontWeight: "700" },
-  volumeLabel: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 4, marginBottom: 6 },
-  volumeRow: { flexDirection: "row", gap: 6 },
-  volumePill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1 },
-  volumeText: { fontSize: 12, fontWeight: "600" },
-  zoneLabel: { fontSize: 13, fontWeight: "500" },
-  testButton: { borderWidth: 1, borderRadius: 6, padding: 8, alignItems: "center", marginTop: 4 },
-  testButtonText: { fontSize: 13, fontWeight: "700" },
-  testResultText: { fontSize: 11, marginTop: 6, fontFamily: "monospace" },
-  testResultRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 4 },
-  testResultLabel: { fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
-  testResultValue: { fontSize: 13, fontWeight: "600", fontFamily: "monospace" },
-  autoTrackDesc: { fontSize: 11, marginTop: 4, lineHeight: 16 },
-  joinRow: { flexDirection: "row", gap: 6, alignItems: "center", marginBottom: 6 },
-  joinInput: { flex: 1, fontSize: 14, borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, letterSpacing: 2 },
-  joinConfirmButton: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 6, alignItems: "center" },
-  joinCancelButton: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6, alignItems: "center" },
-  questBoardHint: { fontSize: 12, marginBottom: 8, lineHeight: 16 },
-  questMemberHeader: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
-  questCount: { fontSize: 13, fontWeight: "700", fontVariant: ["tabular-nums"], marginRight: 8 },
-  addQuestIcon: { fontSize: 20, fontWeight: "700", width: 24, textAlign: "center" },
-  questRow: { flexDirection: "row", alignItems: "center", paddingVertical: 4, paddingLeft: 18 },
-  questCheckbox: { width: 18, height: 18, borderRadius: 4, borderWidth: 1.5, alignItems: "center", justifyContent: "center", marginRight: 8 },
-  questCheckmark: { fontSize: 12, fontWeight: "700", color: "#fff" },
-  questName: { fontSize: 13, fontWeight: "500" },
-  questTrader: { fontSize: 10, fontWeight: "600", marginTop: 1 },
-  questRemove: { fontSize: 14, padding: 4 },
-  noQuestsHint: { fontSize: 12, textAlign: "center", paddingVertical: 4 },
-  questPickerContainer: { borderTopWidth: 1, marginTop: 6, paddingTop: 6 },
-  questPickerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6, borderBottomWidth: 1 },
-  questPickerName: { fontSize: 13, fontWeight: "500", flex: 1 },
-  questPickerTrader: { fontSize: 11, fontWeight: "600", marginLeft: 8 },
+  statusDot: { width: 7, height: 7, borderRadius: 4, marginRight: 8 },
+  memberName: { fontSize: 13, fontWeight: "600" },
+  memberRole: { fontSize: 10, fontWeight: "700", marginLeft: 8 },
+
+  // ─── Gear slots (fast assign) ─────────────────────────────────
+  gearRow: { flexDirection: "row", gap: 3, marginTop: 4 },
+  gearSlot: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingVertical: 3,
+    paddingHorizontal: 4,
+    alignItems: "center",
+  },
+  gearSlotLabel: { fontSize: 8, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.3 },
+  gearSlotValue: { fontSize: 10, fontWeight: "600", marginTop: 1 },
+  loadoutSearchWrap: { marginTop: 4 },
+
+  // ─── Quest board ──────────────────────────────────────────────
+  questMemberHeader: { flexDirection: "row", alignItems: "center", marginBottom: 2 },
+  questCount: { fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"], marginRight: 6 },
+  addQuestIcon: { fontSize: 18, fontWeight: "700", width: 22, textAlign: "center" },
+  questRow: { flexDirection: "row", alignItems: "center", paddingVertical: 3, paddingLeft: 15 },
+  questCheckbox: { width: 16, height: 16, borderRadius: 3, borderWidth: 1.5, alignItems: "center", justifyContent: "center", marginRight: 6 },
+  questCheckmark: { fontSize: 10, fontWeight: "700", color: "#fff" },
+  questName: { fontSize: 12, fontWeight: "500", flex: 1 },
+  questRemove: { fontSize: 12, padding: 3 },
+  questPickerWrap: { borderTopWidth: 1, marginTop: 4, paddingTop: 4 },
+  hintText: { fontSize: 11, textAlign: "center", paddingVertical: 2 },
+
+  // ─── Actions ──────────────────────────────────────────────────
+  actionBtn: { borderWidth: 1, borderRadius: 4, paddingVertical: 6, alignItems: "center" },
+  actionBtnText: { fontSize: 13, fontWeight: "700" },
+  dangerBtn: { borderWidth: 1, borderRadius: 4, paddingVertical: 6, alignItems: "center", marginTop: 6, marginBottom: 4 },
+  dangerBtnText: { fontSize: 13, fontWeight: "700" },
+  joinRow: { flexDirection: "row", gap: 4, alignItems: "center", marginTop: 4 },
+  joinInput: { flex: 1, fontSize: 13, borderWidth: 1, borderRadius: 4, paddingHorizontal: 8, paddingVertical: 4, letterSpacing: 2 },
+  joinBtn: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 4 },
+
+  // ─── Pills / Toggles ─────────────────────────────────────────
+  pillRow: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 2, marginBottom: 4 },
+  pill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1 },
+  pillText: { fontSize: 11, fontWeight: "600" },
+  toggleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: 4 },
+  toggleLabel: { fontSize: 13, fontWeight: "600" },
+  zoneLabel: { fontSize: 12, fontWeight: "500" },
+  gapText: { fontSize: 11, fontWeight: "500", marginBottom: 2 },
+
+  // ─── Backup ───────────────────────────────────────────────────
+  backupRow: { flexDirection: "row", gap: 4, marginTop: 4 },
+  smallBtn: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 10, paddingVertical: 4 },
+
+  // ─── Debug log ────────────────────────────────────────────────
+  debugToggle: { flexDirection: "row", alignItems: "center", paddingVertical: 4, marginTop: 4 },
+  debugActions: { flexDirection: "row", gap: 4, marginBottom: 4 },
+  debugScroll: { maxHeight: 200 },
+  debugRow: { flexDirection: "row", alignItems: "center", paddingVertical: 2, gap: 4 },
+  debugTime: { fontSize: 9, fontFamily: "monospace", width: 48 },
+  debugZone: { fontSize: 9, fontWeight: "700", width: 70 },
+  debugConf: { fontSize: 9, fontWeight: "700", fontFamily: "monospace", width: 28, textAlign: "right" },
+  debugText: { fontSize: 10, fontFamily: "monospace", flex: 1 },
+
+  // ─── About ────────────────────────────────────────────────────
+  appName: { fontSize: 20, fontWeight: "700", textAlign: "center" },
 });

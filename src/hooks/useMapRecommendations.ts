@@ -25,25 +25,24 @@ const RARITY_BONUS: Record<string, number> = {
   legendary: 25,
 };
 
+import { matchesSlot } from "../utils/itemTypes";
+
 // Slot → stat weight mapping for scoring
 const SLOT_STAT_WEIGHTS: Record<EquipmentSlot, Record<string, number>> = {
   weapon: { damage: 2.0, fireRate: 1.5, range: 0.8, magazineSize: 0.5 },
-  armor: { stability: 2.0, weight: 1.0 },
-  helmet: { stability: 1.5, stealth: 0.8 },
-  backpack: { agility: 1.5, stealth: 1.0, weight: 0.5 },
+  shield: { stability: 2.0, weight: 1.0 },
+  augment: { stability: 1.5, agility: 1.0, stealth: 0.8 },
   gadget: { damage: 1.0, range: 1.0, agility: 0.8 },
   consumable: { agility: 1.0, stealth: 0.8, stability: 0.5 },
+  throwable: { damage: 1.5, range: 1.0 },
 };
 
-// Map item_type to equipment slot
+// Map item_type to equipment slot using centralized mapping
 function itemTypeToSlot(itemType: string): EquipmentSlot | null {
-  const t = itemType.toLowerCase();
-  if (t.includes("weapon") || t.includes("gun") || t.includes("rifle") || t.includes("pistol") || t.includes("shotgun")) return "weapon";
-  if (t.includes("armor") || t.includes("vest") || t.includes("chest")) return "armor";
-  if (t.includes("helmet") || t.includes("head") || t.includes("mask")) return "helmet";
-  if (t.includes("backpack") || t.includes("bag") || t.includes("rig")) return "backpack";
-  if (t.includes("gadget") || t.includes("grenade") || t.includes("tool")) return "gadget";
-  if (t.includes("consumable") || t.includes("med") || t.includes("stim") || t.includes("food")) return "consumable";
+  const slots: EquipmentSlot[] = ["weapon", "shield", "augment", "gadget", "consumable", "throwable"];
+  for (const slot of slots) {
+    if (matchesSlot(itemType, slot)) return slot;
+  }
   return null;
 }
 

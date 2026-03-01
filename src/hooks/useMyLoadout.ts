@@ -12,11 +12,11 @@ const STORAGE_KEY = "@arcview/my-loadout";
 
 export type EquipmentSlot =
   | "weapon"
-  | "armor"
-  | "helmet"
-  | "backpack"
+  | "shield"
+  | "augment"
   | "gadget"
-  | "consumable";
+  | "consumable"
+  | "throwable";
 
 export type BuildClass = "DPS" | "Tank" | "Support" | "Hybrid";
 
