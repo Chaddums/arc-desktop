@@ -195,15 +195,13 @@ export type IntelViewMode =
   | "routeDetail";
 
 export type LoadoutViewMode =
+  | "loadoutSummary"
   | "itemBrowser"
   | "itemDetail"
   | "itemCompare"
+  | "itemPicker"
   | "skillTree"
   | "skillDetail"
-  | "damageSim"
-  | "advisor"
-  | "riskScore"
-  | "raidLog"
   | "buildAdvisor"
   | "stashOrganizer";
 

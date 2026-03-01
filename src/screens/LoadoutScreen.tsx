@@ -1,6 +1,6 @@
 /**
- * LoadoutScreen — Tab 2: Item/weapon DB, skill tree, damage sim, build compare,
- * loadout assessment, keep/sell advisor, risk score, raid log, build advisor.
+ * LoadoutScreen — Tab 2: Loadout summary dashboard with equipped gear,
+ * derived stats, risk assessment, map recommendations, and drill-down views.
  */
 
 import React, { useMemo, useState, useCallback, useEffect } from "react";
@@ -24,46 +24,32 @@ import {
   SearchBar,
   ItemRow,
   StatBar,
-  CompareColumn,
   KPIBar,
   RiskGauge,
   ProgressBar,
 } from "../components";
-import { Sparkline } from "../components";
 import { useLoadout } from "../hooks/useLoadout";
 import { useBuildAdvisor } from "../hooks/useBuildAdvisor";
 import { loc } from "../utils/loc";
 import { formatValue } from "../utils/format";
-import type { LoadoutViewMode, MetaForgeItem, StashVerdict, AdvisorVerdict } from "../types";
+import type { LoadoutViewMode, MetaForgeItem, AdvisorVerdict } from "../types";
 import type { PlaystyleGoal, BuildAdvice } from "../hooks/useBuildAdvisor";
+import type { EquipmentSlot } from "../hooks/useMyLoadout";
 
 const ITEM_CATEGORIES = ["Weapon", "Armor", "Consumable", "Material", "Key"];
 
 // ─── Equipment Slot Grid config ──────────────────────────────────
-const EQUIPMENT_SLOTS = [
+const EQUIPMENT_SLOTS: { key: EquipmentSlot; label: string; icon: string }[] = [
   { key: "weapon", label: "Weapon", icon: "W" },
   { key: "armor", label: "Armor", icon: "A" },
   { key: "helmet", label: "Helmet", icon: "H" },
   { key: "backpack", label: "Backpack", icon: "B" },
   { key: "gadget", label: "Gadget", icon: "G" },
   { key: "consumable", label: "Consumable", icon: "C" },
-] as const;
+];
 
-// ─── Build classification helper ────────────────────────────────
+// ─── Build classification colors ────────────────────────────────
 type BuildClass = "DPS" | "Tank" | "Support" | "Hybrid";
-
-function classifyBuild(statBlock?: Record<string, number | undefined>): BuildClass {
-  if (!statBlock) return "Hybrid";
-  const dmg = (statBlock.damage ?? 0) + (statBlock.fireRate ?? 0);
-  const sup = (statBlock.agility ?? 0) + (statBlock.stealth ?? 0);
-  const tank = statBlock.weight ?? 0;
-  const max = Math.max(dmg, sup, tank);
-  if (max === 0) return "Hybrid";
-  if (dmg >= sup && dmg >= tank && dmg > 0) return "DPS";
-  if (tank >= dmg && tank >= sup && tank > 0) return "Tank";
-  if (sup >= dmg && sup >= tank && sup > 0) return "Support";
-  return "Hybrid";
-}
 
 const BUILD_CLASS_COLORS: Record<BuildClass, string> = {
   DPS: Colors.red,
@@ -80,7 +66,7 @@ function getStatQuality(value: number): { color: string; label: string } {
   return { color: Colors.red, label: "Weak" };
 }
 
-// ─── Average stat value for an item (Phase 1b: NaN fix) ─────────
+// ─── Average stat value for an item ──────────────────────────────
 function avgStatValue(item: MetaForgeItem): number {
   if (!item.stat_block) return 0;
   const vals = Object.values(item.stat_block)
@@ -91,6 +77,20 @@ function avgStatValue(item: MetaForgeItem): number {
   return isNaN(avg) ? 0 : Math.round(avg);
 }
 
+// ─── Classify build from item stat_block (for item detail) ──────
+function classifyBuild(statBlock?: Record<string, number | undefined>): BuildClass {
+  if (!statBlock) return "Hybrid";
+  const dmg = (statBlock.damage ?? 0) + (statBlock.fireRate ?? 0);
+  const sup = (statBlock.agility ?? 0) + (statBlock.stealth ?? 0);
+  const tank = statBlock.weight ?? 0;
+  const max = Math.max(dmg, sup, tank);
+  if (max === 0) return "Hybrid";
+  if (dmg >= sup && dmg >= tank && dmg > 0) return "DPS";
+  if (tank >= dmg && tank >= sup && tank > 0) return "Tank";
+  if (sup >= dmg && sup >= tank && sup > 0) return "Support";
+  return "Hybrid";
+}
+
 // ─── Playstyle goal config for build advisor ────────────────────
 const PLAYSTYLE_GOALS: { goal: PlaystyleGoal; icon: string; color: string }[] = [
   { goal: "Aggressive", icon: "A", color: Colors.red },
@@ -98,6 +98,8 @@ const PLAYSTYLE_GOALS: { goal: PlaystyleGoal; icon: string; color: string }[] = 
   { goal: "Survival", icon: "S", color: Colors.green },
   { goal: "Farming", icon: "F", color: Colors.amber },
 ];
+
+const MAP_OPTIONS = ["Dam", "Spaceport", "Buried City", "Blue Gate", "Stella Montis"];
 
 export default function LoadoutScreen() {
   const insets = useSafeAreaInsets();
@@ -124,25 +126,23 @@ export default function LoadoutScreen() {
     skillAllocations,
     allocateSkill,
     deallocateSkill,
-    // Damage sim
-    damageInput,
-    setDamageInput,
-    damageOutput,
-    runDamageSim,
-    // Advisor
-    advisorResult,
-    runAdvisor,
+    // My loadout
+    myLoadout,
+    myLoadoutStats,
+    myBuildClass,
+    equippedCount,
+    equipItem,
+    unequipItem,
+    // Item picker
+    itemPickerSlot,
+    setItemPickerSlot,
+    // Map recommendations
+    mapRecs,
     // Risk score
     riskAssessment,
-    riskLoadout,
-    setRiskLoadout,
     riskMap,
     setRiskMap,
     calculateRisk,
-    // Raid log
-    raidEntries,
-    raidStats,
-    addRaidEntry,
     // Stash organizer
     stashVerdicts,
     stashLoading,
@@ -160,11 +160,14 @@ export default function LoadoutScreen() {
   // ─── Build advisor hook ──────────────────────────────────────
   const { getAdvice } = useBuildAdvisor(items, skillNodes, skillAllocations);
 
-  // ─── Local state for equipment slot filter ────────────────────
+  // ─── Local state for equipment slot filter (item browser) ─────
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
 
-  // ─── Local state for build advisor (default to Balanced) ──────
+  // ─── Local state for build advisor ─────────────────────────────
   const [buildAdvice, setBuildAdvice] = useState<BuildAdvice | null>(() => getAdvice("Balanced"));
+
+  // ─── Item picker search ────────────────────────────────────────
+  const [pickerSearch, setPickerSearch] = useState("");
 
   const filteredItems = useMemo(() => {
     let list = items;
@@ -185,6 +188,19 @@ export default function LoadoutScreen() {
     return list;
   }, [items, selectedCategory, activeSlot, itemSearch]);
 
+  // ─── Item picker: filtered items for slot ──────────────────────
+  const pickerItems = useMemo(() => {
+    if (!itemPickerSlot) return [];
+    let list = items.filter((item) =>
+      item.item_type?.toLowerCase().includes(itemPickerSlot.toLowerCase())
+    );
+    if (pickerSearch) {
+      const q = pickerSearch.toLowerCase();
+      list = list.filter((item) => item.name.toLowerCase().includes(q));
+    }
+    return list;
+  }, [items, itemPickerSlot, pickerSearch]);
+
   // ─── KPI computations for item browser ────────────────────────
   const browserKPI = useMemo(() => {
     const total = items.length;
@@ -203,19 +219,11 @@ export default function LoadoutScreen() {
     (id: string) => {
       setCompareItems((prev: string[]) => {
         if (prev.includes(id)) return prev.filter((x: string) => x !== id);
-        if (prev.length >= 2) return [prev[1], id]; // rotate: drop oldest
+        if (prev.length >= 2) return [prev[1], id];
         return [...prev, id];
       });
     },
     [setCompareItems]
-  );
-
-  // ─── Equipment slot grid handler ──────────────────────────────
-  const handleSlotPress = useCallback(
-    (key: string) => {
-      setActiveSlot((prev) => (prev === key ? null : key));
-    },
-    []
   );
 
   // ─── Build advisor handler ────────────────────────────────────
@@ -227,19 +235,314 @@ export default function LoadoutScreen() {
     [getAdvice]
   );
 
-  // Re-compute advice when items/skills load (getAdvice changes)
   useEffect(() => {
     if (buildAdvice?.goal) {
       setBuildAdvice(getAdvice(buildAdvice.goal));
     }
   }, [getAdvice]);
 
+  // ─── Skill summary for loadout overview ────────────────────────
+  const skillSummary = useMemo(() => {
+    const totalSpent = Object.values(skillAllocations).reduce((s, v) => s + v, 0);
+    const activeCount = Object.values(skillAllocations).filter((v) => v > 0).length;
+    const categories = new Set(
+      skillNodes
+        .filter((n) => (skillAllocations[n.id] ?? 0) > 0)
+        .map((n) => n.category ?? "General")
+    );
+    let synergy = "None";
+    if (categories.size === 1 && totalSpent >= 3) synergy = `${[...categories][0]} Focus`;
+    else if (categories.size >= 2) synergy = "Multi-spec";
+    return { totalSpent, activeCount, synergy };
+  }, [skillAllocations, skillNodes]);
+
   // ══════════════════════════════════════════════════════════════
-  //  ITEM BROWSER
+  //  LOADOUT SUMMARY (new default view)
+  // ══════════════════════════════════════════════════════════════
+  const renderLoadoutSummary = () => {
+    const buildColor = BUILD_CLASS_COLORS[myBuildClass as BuildClass] ?? Colors.amber;
+
+    return (
+      <>
+        {/* 1. Equipment Slot Grid */}
+        <Text style={styles.sectionTitle}>Equipment</Text>
+        <View style={styles.slotGrid}>
+          {EQUIPMENT_SLOTS.map((slot) => {
+            const equipped = myLoadout[slot.key];
+            const rarityColor = equipped?.rarity
+              ? (rarityColors as Record<string, string>)[equipped.rarity.toLowerCase()]
+              : undefined;
+
+            return (
+              <TouchableOpacity
+                key={slot.key}
+                style={[
+                  styles.slotCell,
+                  equipped && {
+                    borderColor: rarityColor ?? Colors.accent,
+                    backgroundColor: (rarityColor ?? Colors.accent) + "12",
+                  },
+                ]}
+                onPress={() => {
+                  setItemPickerSlot(slot.key);
+                  setPickerSearch("");
+                  setViewMode("itemPicker");
+                }}
+                onLongPress={() => {
+                  if (equipped) unequipItem(slot.key);
+                }}
+                activeOpacity={0.7}
+              >
+                {equipped ? (
+                  <>
+                    <Text style={[styles.slotIcon, { color: rarityColor ?? Colors.accent }]}>
+                      {slot.icon}
+                    </Text>
+                    <Text style={[styles.slotItemName, { color: rarityColor ?? Colors.text }]} numberOfLines={1}>
+                      {equipped.name}
+                    </Text>
+                    {equipped.rarity && (
+                      <Text style={[styles.slotRarity, { color: rarityColor ?? Colors.textSecondary }]}>
+                        {equipped.rarity}
+                      </Text>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.slotIcon}>{slot.icon}</Text>
+                    <Text style={styles.slotLabel}>{slot.label}</Text>
+                    <Text style={styles.slotEmptyHint}>Tap to equip</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        {/* 2. Stats Dashboard (when items equipped) */}
+        {equippedCount > 0 && (
+          <>
+            <View style={styles.buildBadgeRow}>
+              <View style={[styles.buildBadge, { backgroundColor: buildColor + "22", borderColor: buildColor }]}>
+                <Text style={[styles.buildBadgeText, { color: buildColor }]}>
+                  {myBuildClass}
+                </Text>
+              </View>
+              <Text style={styles.equippedCountText}>{equippedCount}/6 slots</Text>
+            </View>
+
+            <KPIBar
+              cells={[
+                { label: "Overall", value: String(myLoadoutStats.overallScore), color: C.accent },
+                { label: "Damage", value: String(myLoadoutStats.damageOutput), color: Colors.red },
+                { label: "Survive", value: String(myLoadoutStats.survivability), color: Colors.green },
+                { label: "Mobility", value: String(myLoadoutStats.mobility), color: Colors.amber },
+              ]}
+            />
+
+            <View style={styles.kpiGap} />
+
+            <Panel>
+              <Text style={styles.subHeading}>Stat Breakdown</Text>
+              <StatBar label="Damage Output" value={myLoadoutStats.damageOutput} maxValue={300} color={Colors.red} />
+              <StatBar label="Survivability" value={myLoadoutStats.survivability} maxValue={300} color={Colors.green} />
+              <StatBar label="Mobility" value={myLoadoutStats.mobility} maxValue={300} color={Colors.amber} />
+            </Panel>
+          </>
+        )}
+
+        {/* 3. Inline Risk Assessment */}
+        <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Risk Assessment</Text>
+        <Panel>
+          <FilterPills
+            options={MAP_OPTIONS}
+            selected={riskMap}
+            onSelect={(map) => {
+              setRiskMap(map);
+            }}
+            allLabel="Any"
+          />
+
+          <TouchableOpacity style={styles.simButton} onPress={calculateRisk}>
+            <Text style={styles.simButtonText}>Assess Risk</Text>
+          </TouchableOpacity>
+
+          {riskAssessment && (
+            <>
+              <View style={styles.riskCenter}>
+                <RiskGauge score={riskAssessment.score} />
+              </View>
+              <Text style={styles.recommendText}>{riskAssessment.recommendation}</Text>
+            </>
+          )}
+        </Panel>
+
+        {/* 4. Skill Summary */}
+        <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Skills</Text>
+        <Panel>
+          <View style={styles.skillSummaryRow}>
+            <View style={styles.skillSummaryCell}>
+              <Text style={styles.skillSummaryValue}>{skillSummary.totalSpent}</Text>
+              <Text style={styles.skillSummaryLabel}>Points Spent</Text>
+            </View>
+            <View style={styles.skillSummaryCell}>
+              <Text style={styles.skillSummaryValue}>{skillSummary.activeCount}</Text>
+              <Text style={styles.skillSummaryLabel}>Skills Active</Text>
+            </View>
+            <View style={styles.skillSummaryCell}>
+              <Text style={[styles.skillSummaryValue, { color: Colors.accent }]}>
+                {skillSummary.synergy}
+              </Text>
+              <Text style={styles.skillSummaryLabel}>Synergy</Text>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.inlineButton}
+            onPress={() => setViewMode("skillTree")}
+          >
+            <Text style={styles.inlineButtonText}>Edit Skill Tree</Text>
+          </TouchableOpacity>
+        </Panel>
+
+        {/* 5. Map Recommendations */}
+        <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Map Recommendations</Text>
+        <Panel>
+          <FilterPills
+            options={mapRecs.maps}
+            selected={mapRecs.selectedMap}
+            onSelect={mapRecs.setSelectedMap}
+            allLabel="Select Map"
+          />
+
+          {mapRecs.selectedMap && (
+            <>
+              {/* Threat summary */}
+              <View style={styles.threatRow}>
+                <Text style={styles.threatLabel}>
+                  {mapRecs.threatSummary.totalEnemies} enemies
+                </Text>
+                {mapRecs.threatSummary.highThreatCount > 0 && (
+                  <Text style={[styles.threatLabel, { color: Colors.red }]}>
+                    {mapRecs.threatSummary.highThreatCount} high-threat
+                  </Text>
+                )}
+                {mapRecs.threatSummary.dominantWeakness && (
+                  <Text style={[styles.threatLabel, { color: Colors.accent }]}>
+                    Weakness: {mapRecs.threatSummary.dominantWeakness}
+                  </Text>
+                )}
+              </View>
+
+              <Divider />
+
+              {/* Per-slot recommendations */}
+              {mapRecs.recommendations.size === 0 ? (
+                <Text style={styles.hintText}>No recommendations for this map</Text>
+              ) : (
+                Array.from(mapRecs.recommendations.entries()).map(([slot, recs]) => (
+                  <View key={slot}>
+                    <Text style={styles.recSlotTitle}>{slot}</Text>
+                    {recs.map((rec) => (
+                      <TouchableOpacity
+                        key={rec.item.id}
+                        style={styles.recItemRow}
+                        onPress={() => equipItem(slot, rec.item)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.recItemInfo}>
+                          <Text style={styles.recItemName} numberOfLines={1}>{rec.item.name}</Text>
+                          <Text style={styles.recItemReasoning} numberOfLines={1}>{rec.reasoning}</Text>
+                        </View>
+                        <View style={styles.recItemRight}>
+                          <Text style={[styles.recItemScore, {
+                            color: rec.score >= 50 ? C.green : rec.score >= 20 ? C.amber : C.textSecondary,
+                          }]}>
+                            {rec.score}
+                          </Text>
+                          <Text style={styles.recEquipHint}>EQUIP</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ))
+              )}
+            </>
+          )}
+        </Panel>
+
+        {/* 6. Quick Nav */}
+        <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Tools</Text>
+        <View style={styles.quickNav}>
+          {[
+            { label: "Items", icon: "I", mode: "itemBrowser" as LoadoutViewMode },
+            { label: "Advisor", icon: "A", mode: "buildAdvisor" as LoadoutViewMode },
+            { label: "Stash", icon: "S", mode: "stashOrganizer" as LoadoutViewMode },
+            { label: "Skills", icon: "T", mode: "skillTree" as LoadoutViewMode },
+          ].map((nav) => (
+            <TouchableOpacity
+              key={nav.mode}
+              style={styles.quickNavButton}
+              onPress={() => setViewMode(nav.mode)}
+            >
+              <Text style={styles.quickNavIcon}>{nav.icon}</Text>
+              <Text style={styles.quickNavLabel}>{nav.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════════
+  //  ITEM PICKER (slot-specific)
+  // ══════════════════════════════════════════════════════════════
+  const renderItemPicker = () => {
+    const slotConfig = EQUIPMENT_SLOTS.find((s) => s.key === itemPickerSlot);
+    const slotLabel = slotConfig?.label ?? "Item";
+
+    return (
+      <>
+        <BackHeader title={`Equip ${slotLabel}`} onBack={goBack} />
+        <SearchBar value={pickerSearch} onChangeText={setPickerSearch} placeholder={`Search ${slotLabel.toLowerCase()}s...`} />
+
+        <View style={styles.listPad}>
+          {pickerItems.length === 0 ? (
+            <EmptyState
+              icon="?"
+              title={`No ${slotLabel.toLowerCase()}s found`}
+              hint={loading ? "Loading..." : "Try a different search"}
+            />
+          ) : (
+            pickerItems.map((item, idx) => (
+              <View key={item.id} style={idx % 2 === 1 ? styles.rowAlt : undefined}>
+                <ItemRow
+                  name={item.name}
+                  subtitle={`${item.item_type}${item.rarity ? ` \u00B7 ${item.rarity}` : ""}`}
+                  rarity={item.rarity}
+                  rightText="EQUIP"
+                  rightColor={Colors.accent}
+                  onPress={() => {
+                    if (itemPickerSlot) {
+                      equipItem(itemPickerSlot, item);
+                      setViewMode("loadoutSummary");
+                    }
+                  }}
+                />
+              </View>
+            ))
+          )}
+        </View>
+      </>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════════
+  //  ITEM BROWSER (kept)
   // ══════════════════════════════════════════════════════════════
   const renderItemBrowser = () => (
     <>
-      {/* Upgrade priority KPI bar */}
+      <BackHeader title="Loadout" onBack={goBack} />
+
       <KPIBar
         cells={[
           { label: "Known Items", value: String(browserKPI.total) },
@@ -257,69 +560,6 @@ export default function LoadoutScreen() {
         onSelect={setSelectedCategory}
         allLabel="All Items"
       />
-
-      {/* Equipment slot grid (3x2) */}
-      <View style={styles.slotGrid}>
-        {EQUIPMENT_SLOTS.map((slot) => {
-          const isActive = activeSlot === slot.key;
-          return (
-            <TouchableOpacity
-              key={slot.key}
-              style={[styles.slotCell, isActive && styles.slotCellActive]}
-              onPress={() => handleSlotPress(slot.key)}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.slotIcon, isActive && styles.slotIconActive]}>
-                {slot.icon}
-              </Text>
-              <Text style={[styles.slotLabel, isActive && styles.slotLabelActive]}>
-                {slot.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* Quick nav row — 3 primary tabs */}
-      <View style={styles.quickNav}>
-        {[
-          { label: "Build", subtitle: "Skills + damage simulation", icon: "B", mode: "skillTree" as LoadoutViewMode },
-          { label: "Analyze", subtitle: "Compare + risk + advisor", icon: "A", mode: "itemCompare" as LoadoutViewMode },
-          { label: "History", subtitle: "Your raid performance", icon: "H", mode: "raidLog" as LoadoutViewMode },
-        ].map((item) => (
-          <TouchableOpacity
-            key={item.mode}
-            style={styles.quickNavButton}
-            onPress={() => setViewMode(item.mode)}
-          >
-            <Text style={styles.quickNavIcon}>{item.icon}</Text>
-            <Text style={styles.quickNavLabel}>{item.label}</Text>
-            <Text style={styles.quickNavSubtitle}>{item.subtitle}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Build Advisor button */}
-      <TouchableOpacity
-        style={styles.buildAdvisorButton}
-        onPress={() => setViewMode("buildAdvisor")}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.buildAdvisorButtonIcon}>*</Text>
-        <Text style={styles.buildAdvisorButtonText}>Build Advisor</Text>
-        <Text style={styles.buildAdvisorButtonHint}>Get recommendations for your playstyle</Text>
-      </TouchableOpacity>
-
-      {/* Stash Organizer button */}
-      <TouchableOpacity
-        style={styles.buildAdvisorButton}
-        onPress={() => setViewMode("stashOrganizer")}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.buildAdvisorButtonIcon}>{"\u2726"}</Text>
-        <Text style={styles.buildAdvisorButtonText}>Stash Organizer</Text>
-        <Text style={styles.buildAdvisorButtonHint}>Bulk keep/sell/recycle verdicts for all items</Text>
-      </TouchableOpacity>
 
       <View style={styles.listPad}>
         {filteredItems.length === 0 ? (
@@ -352,7 +592,7 @@ export default function LoadoutScreen() {
   );
 
   // ══════════════════════════════════════════════════════════════
-  //  ITEM DETAIL
+  //  ITEM DETAIL (kept)
   // ══════════════════════════════════════════════════════════════
   const renderItemDetail = () => {
     if (!itemDetail) return <EmptyState title="Item not found" />;
@@ -376,7 +616,6 @@ export default function LoadoutScreen() {
             {itemDetail.value != null && <Text style={styles.valueBadge}>{itemDetail.value} value</Text>}
           </View>
 
-          {/* Build classification tag */}
           <View style={styles.buildTagRow}>
             <View style={[styles.buildTag, { backgroundColor: BUILD_CLASS_COLORS[buildClass] + "22", borderColor: BUILD_CLASS_COLORS[buildClass] }]}>
               <Text style={[styles.buildTagText, { color: BUILD_CLASS_COLORS[buildClass] }]}>
@@ -424,15 +663,6 @@ export default function LoadoutScreen() {
           >
             <Text style={styles.actionButtonText}>Compare</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => {
-              runAdvisor(itemDetail.id);
-              setViewMode("advisor");
-            }}
-          >
-            <Text style={styles.actionButtonText}>Advisor</Text>
-          </TouchableOpacity>
           {typeof window !== "undefined" && window.arcDesktop && (
             <TouchableOpacity
               style={styles.actionButton}
@@ -447,16 +677,14 @@ export default function LoadoutScreen() {
   };
 
   // ══════════════════════════════════════════════════════════════
-  //  ITEM COMPARE
+  //  ITEM COMPARE (kept)
   // ══════════════════════════════════════════════════════════════
   const renderItemCompare = () => {
-    // Gather the two compared items
     const comparedItems = compareItems
       .slice(0, 2)
       .map((id: string) => items.find((it) => it.id === id))
       .filter(Boolean) as MetaForgeItem[];
 
-    // Compute winner based on total stat advantage
     let winnerIndex: number | null = null;
     if (comparedItems.length === 2) {
       const statsA = comparedItems[0].stat_block ?? {};
@@ -479,7 +707,6 @@ export default function LoadoutScreen() {
         <BackHeader title="Items" onBack={goBack} />
         <Text style={styles.sectionTitle}>Item Comparison</Text>
 
-        {/* Item selector from browse list */}
         <Panel>
           <Text style={styles.subHeading}>Select items to compare</Text>
           {compareItems.length < 2 && (
@@ -524,7 +751,6 @@ export default function LoadoutScreen() {
           </Panel>
         ) : (
           <>
-            {/* Winner indicator */}
             <View style={styles.winnerBar}>
               {winnerIndex != null ? (
                 <Text style={styles.winnerText}>
@@ -536,7 +762,6 @@ export default function LoadoutScreen() {
             </View>
 
             <Panel>
-              {/* Side-by-side headers */}
               <View style={styles.compareRow}>
                 {comparedItems.map((it, i) => (
                   <View key={it.id} style={styles.compareColHeader}>
@@ -554,7 +779,6 @@ export default function LoadoutScreen() {
 
               <Divider />
 
-              {/* Stat-by-stat comparison grid */}
               {(() => {
                 const statsA = comparedItems[0].stat_block ?? {};
                 const statsB = comparedItems[1].stat_block ?? {};
@@ -581,7 +805,7 @@ export default function LoadoutScreen() {
   };
 
   // ══════════════════════════════════════════════════════════════
-  //  SKILL TREE
+  //  SKILL TREE (kept)
   // ══════════════════════════════════════════════════════════════
   const renderSkillTree = () => (
     <>
@@ -689,264 +913,7 @@ export default function LoadoutScreen() {
   };
 
   // ══════════════════════════════════════════════════════════════
-  //  DAMAGE SIM
-  // ══════════════════════════════════════════════════════════════
-  const renderDamageSim = () => (
-    <>
-      <BackHeader title="Loadout" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Damage Simulator</Text>
-      <Panel>
-        <Text style={styles.subHeading}>Weapon Stats</Text>
-        {[
-          { label: "Damage", key: "weaponDamage" as const },
-          { label: "Fire Rate", key: "fireRate" as const },
-          { label: "Magazine", key: "magazineSize" as const },
-          { label: "Reload (s)", key: "reloadTime" as const },
-          { label: "Target HP", key: "targetHealth" as const },
-        ].map(({ label, key }) => (
-          <View key={key} style={styles.simInputRow}>
-            <Text style={styles.simLabel}>{label}</Text>
-            <TouchableOpacity
-              style={styles.simInputBox}
-              onPress={() => {
-                const current = damageInput[key] ?? 0;
-                setDamageInput({ ...damageInput, [key]: current + 1 });
-              }}
-            >
-              <Text style={styles.simInputText}>{damageInput[key] ?? 0}</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
-
-        <TouchableOpacity style={styles.simButton} onPress={runDamageSim}>
-          <Text style={styles.simButtonText}>Calculate</Text>
-        </TouchableOpacity>
-      </Panel>
-
-      {damageOutput && (
-        <Panel style={styles.resultCard} variant="glow">
-          <Text style={styles.subHeading}>Results</Text>
-          <View style={styles.resultGrid}>
-            <View style={styles.resultCell}>
-              <Text style={styles.resultValue}>{damageOutput.dps.toFixed(1)}</Text>
-              <Text style={styles.resultLabel}>DPS</Text>
-            </View>
-            <View style={styles.resultCell}>
-              <Text style={styles.resultValue}>{damageOutput.effectiveDps.toFixed(1)}</Text>
-              <Text style={styles.resultLabel}>Effective DPS</Text>
-            </View>
-            <View style={styles.resultCell}>
-              <Text style={styles.resultValue}>
-                {damageOutput.ttk != null ? `${damageOutput.ttk.toFixed(1)}s` : "N/A"}
-              </Text>
-              <Text style={styles.resultLabel}>TTK</Text>
-            </View>
-            <View style={styles.resultCell}>
-              <Text style={styles.resultValue}>{damageOutput.magDumpDamage}</Text>
-              <Text style={styles.resultLabel}>Mag Dump</Text>
-            </View>
-          </View>
-        </Panel>
-      )}
-    </>
-  );
-
-  // ══════════════════════════════════════════════════════════════
-  //  ADVISOR
-  // ══════════════════════════════════════════════════════════════
-  const renderAdvisor = () => (
-    <>
-      <BackHeader title="Items" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Keep / Sell / Recycle</Text>
-      {!advisorResult ? (
-        <EmptyState icon="?" title="No advisor result" hint="Select an item and run advisor" />
-      ) : (
-        <Panel variant={advisorResult.verdict === "keep" ? "glow" : "default"}>
-          <Text style={[styles.verdictText, {
-            color: advisorResult.verdict === "keep" ? Colors.verdictKeep
-              : advisorResult.verdict === "sell" ? Colors.verdictSell
-              : Colors.verdictRecycle,
-          }]}>
-            {advisorResult.verdict.toUpperCase()}
-          </Text>
-          <Text style={styles.reasoningText}>{advisorResult.reasoning}</Text>
-
-          <Divider />
-
-          <View style={styles.advisorCompare}>
-            <View style={styles.advisorCol}>
-              <Text style={styles.advisorColTitle}>Sell</Text>
-              <Text style={styles.advisorColValue}>{advisorResult.sellValue} value</Text>
-            </View>
-            <View style={styles.advisorCol}>
-              <Text style={styles.advisorColTitle}>Recycle</Text>
-              <Text style={styles.advisorColValue}>~{advisorResult.totalRecycleValue} value</Text>
-            </View>
-          </View>
-
-          {advisorResult.recycleYields.length > 0 && (
-            <>
-              <Divider />
-              <Text style={styles.subHeading}>Recycle Yields</Text>
-              {advisorResult.recycleYields.map((y, i) => (
-                <Text key={i} style={styles.yieldText}>
-                  {y.itemName} x{y.quantity} (~{y.estimatedValue} value)
-                </Text>
-              ))}
-            </>
-          )}
-
-          {advisorResult.craftingUses.length > 0 && (
-            <>
-              <Divider />
-              <Text style={styles.subHeading}>Used In Crafting</Text>
-              {advisorResult.craftingUses.map((use, i) => (
-                <Text key={i} style={styles.yieldText}>{"\u2022"} {use}</Text>
-              ))}
-            </>
-          )}
-        </Panel>
-      )}
-    </>
-  );
-
-  // ══════════════════════════════════════════════════════════════
-  //  RISK SCORE (Phase 5e: Beta label + disclaimer)
-  // ══════════════════════════════════════════════════════════════
-  const renderRiskScore = () => (
-    <>
-      <BackHeader title="Loadout" onBack={goBack} />
-      <Text style={styles.sectionTitle}>Pre-Raid Risk Assessment (Beta)</Text>
-      <Panel>
-        <Text style={styles.subHeading}>Select Map</Text>
-        <FilterPills
-          options={["Dam", "Spaceport", "Buried City", "Blue Gate", "Stella Montis"]}
-          selected={riskMap}
-          onSelect={setRiskMap}
-          allLabel="Any"
-        />
-
-        <TouchableOpacity style={styles.simButton} onPress={calculateRisk}>
-          <Text style={styles.simButtonText}>Assess Risk</Text>
-        </TouchableOpacity>
-      </Panel>
-
-      {riskAssessment && (
-        <Panel variant="glow" style={styles.riskPanel}>
-          <View style={styles.riskCenter}>
-            <RiskGauge score={riskAssessment.score} />
-          </View>
-
-          <Divider />
-
-          <Text style={styles.subHeading}>Factors</Text>
-          {riskAssessment.factors.map((f, i) => (
-            <View key={i} style={styles.factorRow}>
-              <Text style={styles.factorLabel}>{f.label}</Text>
-              <Text style={[styles.factorImpact, {
-                color: f.impact > 0 ? Colors.riskHigh : f.impact < 0 ? Colors.riskLow : Colors.diffNeutral
-              }]}>
-                {f.impact > 0 ? "+" : ""}{f.impact}
-              </Text>
-            </View>
-          ))}
-
-          <Divider />
-          <Text style={styles.recommendText}>{riskAssessment.recommendation}</Text>
-          <Text style={styles.disclaimerText}>Estimates based on available data</Text>
-        </Panel>
-      )}
-    </>
-  );
-
-  // ══════════════════════════════════════════════════════════════
-  //  RAID LOG
-  // ══════════════════════════════════════════════════════════════
-  const renderRaidLog = () => {
-    const totalRaids = raidEntries.length;
-    const extractions = raidEntries.filter((r) => r.outcome === "extracted").length;
-    const successRate = totalRaids > 0 ? Math.round((extractions / totalRaids) * 100) : 0;
-    const avgLoot = totalRaids > 0
-      ? Math.round(raidEntries.reduce((sum, r) => sum + (r.lootValue ?? 0), 0) / totalRaids)
-      : 0;
-
-    return (
-      <>
-        <BackHeader title="Loadout" onBack={goBack} />
-        <Text style={styles.sectionTitle}>Raid Log</Text>
-
-        <KPIBar
-          cells={[
-            { label: "Total Raids", value: String(totalRaids) },
-            { label: "Extract Rate", value: `${successRate}%`, color: successRate >= 50 ? Colors.green : Colors.red },
-            { label: "Avg Loot", value: String(avgLoot) },
-          ]}
-        />
-
-        <TouchableOpacity style={styles.addButton} onPress={addRaidEntry}>
-          <Text style={styles.addButtonText}>+ Log Raid</Text>
-        </TouchableOpacity>
-
-        {raidEntries.length === 0 ? (
-          <EmptyState
-            icon="?"
-            title="No raids logged"
-            hint="Log your raids to build personal stats"
-          />
-        ) : (
-          <>
-            <Text style={[styles.sectionTitle, { marginTop: spacing.md }]}>Recent Raids</Text>
-            {raidEntries.slice(0, 20).map((entry) => (
-              <Panel key={entry.id} style={styles.raidCard}>
-                <View style={styles.raidRow}>
-                  <View style={styles.raidInfo}>
-                    <Text style={styles.raidMap}>{entry.mapId}</Text>
-                    <Text style={styles.raidDate}>
-                      {new Date(entry.date).toLocaleDateString()}
-                    </Text>
-                  </View>
-                  <Text style={[styles.raidOutcome, {
-                    color: entry.outcome === "extracted" ? Colors.green
-                      : entry.outcome === "died" ? Colors.red
-                      : Colors.amber,
-                  }]}>
-                    {entry.outcome === "extracted" ? "EXTRACTED"
-                      : entry.outcome === "died" ? "DIED"
-                      : "PARTIAL"}
-                  </Text>
-                </View>
-                {entry.lootValue != null && (
-                  <Text style={styles.raidLoot}>Loot: {entry.lootValue} value</Text>
-                )}
-              </Panel>
-            ))}
-
-            {raidStats.length > 0 && (
-              <>
-                <Divider />
-                <Text style={styles.subHeading}>Loadout Performance</Text>
-                {raidStats.map((stat) => (
-                  <Panel key={stat.loadoutKey} style={styles.statCard}>
-                    <Text style={styles.statLoadout}>{stat.items.join(" + ")}</Text>
-                    <View style={styles.statRow}>
-                      <Text style={styles.statText}>
-                        {stat.extractions}/{stat.totalRaids} ({Math.round(stat.successRate * 100)}%)
-                      </Text>
-                      <Text style={styles.statLoot}>Avg: {Math.round(stat.avgLootValue)}</Text>
-                    </View>
-                    <ProgressBar progress={stat.successRate} />
-                  </Panel>
-                ))}
-              </>
-            )}
-          </>
-        )}
-      </>
-    );
-  };
-
-  // ══════════════════════════════════════════════════════════════
-  //  STASH ORGANIZER
+  //  STASH ORGANIZER (kept)
   // ══════════════════════════════════════════════════════════════
   const [stashFilter, setStashFilter] = useState<AdvisorVerdict | null>(null);
   const [stashSearch, setStashSearch] = useState("");
@@ -1068,7 +1035,7 @@ export default function LoadoutScreen() {
   );
 
   // ══════════════════════════════════════════════════════════════
-  //  BUILD ADVISOR (Phase 5d)
+  //  BUILD ADVISOR (kept)
   // ══════════════════════════════════════════════════════════════
   const renderBuildAdvisor = () => (
     <>
@@ -1109,13 +1076,11 @@ export default function LoadoutScreen() {
 
       {buildAdvice && (
         <>
-          {/* Summary */}
           <Panel variant="glow" style={styles.adviceSummaryPanel}>
             <Text style={styles.adviceSummaryTitle}>{buildAdvice.goal} Build</Text>
             <Text style={styles.adviceSummaryText}>{buildAdvice.summary}</Text>
           </Panel>
 
-          {/* Recommended items by category */}
           {buildAdvice.itemRecommendations.size === 0 && (
             <Panel style={styles.adviceItemCard}>
               <Text style={{ color: C.textSecondary, textAlign: "center", padding: 12 }}>
@@ -1154,7 +1119,6 @@ export default function LoadoutScreen() {
             </View>
           ))}
 
-          {/* Skill recommendations */}
           {buildAdvice.skillRecommendations.length > 0 && (
             <>
               <Text style={styles.adviceSlotTitle}>Recommended Skills</Text>
@@ -1174,7 +1138,6 @@ export default function LoadoutScreen() {
             </>
           )}
 
-          {/* Beta disclaimer */}
           <Text style={{ color: C.textSecondary, fontSize: 10, textAlign: "center", marginTop: 12, opacity: 0.6 }}>
             (Beta) Estimates based on available data
           </Text>
@@ -1202,15 +1165,13 @@ export default function LoadoutScreen() {
           </Panel>
         )}
 
+        {viewMode === "loadoutSummary" && renderLoadoutSummary()}
+        {viewMode === "itemPicker" && renderItemPicker()}
         {viewMode === "itemBrowser" && renderItemBrowser()}
         {viewMode === "itemDetail" && renderItemDetail()}
         {viewMode === "itemCompare" && renderItemCompare()}
         {viewMode === "skillTree" && renderSkillTree()}
         {viewMode === "skillDetail" && renderSkillDetail()}
-        {viewMode === "damageSim" && renderDamageSim()}
-        {viewMode === "advisor" && renderAdvisor()}
-        {viewMode === "riskScore" && renderRiskScore()}
-        {viewMode === "raidLog" && renderRaidLog()}
         {viewMode === "buildAdvisor" && renderBuildAdvisor()}
         {viewMode === "stashOrganizer" && renderStashOrganizer()}
       </ScrollView>
@@ -1244,8 +1205,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.xs,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
   slotCell: {
     width: "31%",
@@ -1258,19 +1218,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xs,
-  },
-  slotCellActive: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.accentBg,
+    minHeight: 70,
+    justifyContent: "center",
   },
   slotIcon: {
     fontSize: fs.lg,
     fontWeight: "700",
     color: Colors.textSecondary,
     marginBottom: spacing.xxs,
-  },
-  slotIconActive: {
-    color: Colors.accent,
   },
   slotLabel: {
     fontSize: fs.xs,
@@ -1279,45 +1234,151 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.4,
   },
-  slotLabelActive: {
-    color: Colors.accent,
-  },
-
-  // ─── Quick nav ───────────────────────────────────────────────
-  quickNav: { flexDirection: "row", gap: spacing.xs, marginTop: spacing.sm, marginBottom: spacing.xs },
-  quickNavButton: { flex: 1, alignItems: "center", backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingVertical: spacing.sm, paddingHorizontal: spacing.xs },
-  quickNavIcon: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent, marginBottom: spacing.xxs },
-  quickNavLabel: { fontSize: 8, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4 },
-  quickNavSubtitle: { fontSize: 7, color: Colors.textMuted, textAlign: "center", marginTop: 2 },
-
-  // ─── Build Advisor button ────────────────────────────────────
-  buildAdvisorButton: {
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.borderAccent,
-    borderRadius: 6,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.xs,
-    marginBottom: spacing.xs,
-    alignItems: "center",
-  },
-  buildAdvisorButtonIcon: {
-    fontSize: fs.lg,
-    fontWeight: "700",
-    color: Colors.accent,
-    marginBottom: spacing.xxs,
-  },
-  buildAdvisorButtonText: {
-    fontSize: fs.md,
-    fontWeight: "700",
-    color: Colors.accent,
-  },
-  buildAdvisorButtonHint: {
-    fontSize: fs.xs,
+  slotEmptyHint: {
+    fontSize: 8,
     color: Colors.textMuted,
     marginTop: 2,
   },
+  slotItemName: {
+    fontSize: fs.xs,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+  slotRarity: {
+    fontSize: 8,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+
+  // ─── Build badge ──────────────────────────────────────────────
+  buildBadgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  buildBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  buildBadgeText: {
+    fontSize: fs.xs,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  equippedCountText: {
+    fontSize: fs.sm,
+    color: Colors.textSecondary,
+  },
+
+  // ─── Skill summary ───────────────────────────────────────────
+  skillSummaryRow: {
+    flexDirection: "row",
+    marginBottom: spacing.sm,
+  },
+  skillSummaryCell: {
+    flex: 1,
+    alignItems: "center",
+  },
+  skillSummaryValue: {
+    fontSize: fs.lg,
+    fontWeight: "700",
+    color: Colors.text,
+  },
+  skillSummaryLabel: {
+    fontSize: fs.xs,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+
+  // ─── Inline button ────────────────────────────────────────────
+  inlineButton: {
+    backgroundColor: Colors.accentBg,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    borderRadius: 6,
+    padding: spacing.xs,
+    alignItems: "center",
+  },
+  inlineButtonText: {
+    fontSize: fs.sm,
+    fontWeight: "700",
+    color: Colors.accent,
+  },
+
+  // ─── Threat row ───────────────────────────────────────────────
+  threatRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginVertical: spacing.sm,
+  },
+  threatLabel: {
+    fontSize: fs.sm,
+    fontWeight: "600",
+    color: Colors.textSecondary,
+  },
+
+  // ─── Recommendations ─────────────────────────────────────────
+  recSlotTitle: {
+    fontSize: fs.sm,
+    fontWeight: "700",
+    color: Colors.accent,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xxs,
+  },
+  recItemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: spacing.xs,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  recItemInfo: {
+    flex: 1,
+  },
+  recItemName: {
+    fontSize: fs.md,
+    fontWeight: "600",
+    color: Colors.text,
+  },
+  recItemReasoning: {
+    fontSize: fs.xs,
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  recItemRight: {
+    alignItems: "flex-end",
+    marginLeft: spacing.sm,
+  },
+  recItemScore: {
+    fontSize: fs.lg,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  recEquipHint: {
+    fontSize: 7,
+    fontWeight: "700",
+    color: Colors.accent,
+    marginTop: 1,
+  },
+
+  // ─── Quick nav ───────────────────────────────────────────────
+  quickNav: { flexDirection: "row", gap: spacing.xs, marginBottom: spacing.xs },
+  quickNavButton: { flex: 1, alignItems: "center", backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingVertical: spacing.sm, paddingHorizontal: spacing.xs },
+  quickNavIcon: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent, marginBottom: spacing.xxs },
+  quickNavLabel: { fontSize: 8, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.4 },
+
+  // ─── Sim / Risk ───────────────────────────────────────────────
+  simButton: { backgroundColor: Colors.accentBg, borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: spacing.sm, alignItems: "center", marginTop: spacing.sm },
+  simButtonText: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent },
+  riskCenter: { alignItems: "center", paddingVertical: spacing.sm },
+  recommendText: { fontSize: fs.md, color: Colors.accent, textAlign: "center", fontWeight: "600", marginTop: spacing.xs },
 
   // ─── Item list ───────────────────────────────────────────────
   listPad: { paddingTop: spacing.sm },
@@ -1337,38 +1398,14 @@ const styles = StyleSheet.create({
   descText: { fontSize: fs.md, color: Colors.text, lineHeight: 18 },
 
   // ─── Build classification tag ────────────────────────────────
-  buildTagRow: {
-    flexDirection: "row",
-    marginTop: spacing.sm,
-  },
-  buildTag: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xxs,
-    borderRadius: 4,
-    borderWidth: 1,
-  },
-  buildTagText: {
-    fontSize: fs.xs,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
+  buildTagRow: { flexDirection: "row", marginTop: spacing.sm },
+  buildTag: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xxs, borderRadius: 4, borderWidth: 1 },
+  buildTagText: { fontSize: fs.xs, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
 
   // ─── Stat bar with quality label ─────────────────────────────
-  statBarRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  statBarFlex: {
-    flex: 1,
-  },
-  statQualityLabel: {
-    fontSize: fs.xs,
-    fontWeight: "700",
-    width: 56,
-    textAlign: "right",
-  },
+  statBarRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  statBarFlex: { flex: 1 },
+  statQualityLabel: { fontSize: fs.xs, fontWeight: "700", width: 56, textAlign: "right" },
 
   // ─── Actions ─────────────────────────────────────────────────
   actionRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
@@ -1389,23 +1426,10 @@ const styles = StyleSheet.create({
     minWidth: 80,
     alignItems: "center",
   },
-  comparePickerItemActive: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.accentBg,
-  },
-  comparePickerName: {
-    fontSize: fs.xs,
-    fontWeight: "600",
-    color: Colors.textSecondary,
-  },
-  comparePickerNameActive: {
-    color: Colors.accent,
-  },
-  comparePickerRarity: {
-    fontSize: 8,
-    fontWeight: "700",
-    marginTop: 1,
-  },
+  comparePickerItemActive: { borderColor: Colors.accent, backgroundColor: Colors.accentBg },
+  comparePickerName: { fontSize: fs.xs, fontWeight: "600", color: Colors.textSecondary },
+  comparePickerNameActive: { color: Colors.accent },
+  comparePickerRarity: { fontSize: 8, fontWeight: "700", marginTop: 1 },
   winnerBar: {
     backgroundColor: Colors.accentBg,
     borderWidth: 1,
@@ -1416,26 +1440,10 @@ const styles = StyleSheet.create({
     marginVertical: spacing.xs,
     alignItems: "center",
   },
-  winnerText: {
-    fontSize: fs.md,
-    fontWeight: "700",
-    color: Colors.green,
-  },
-  winnerTextTie: {
-    fontSize: fs.md,
-    fontWeight: "700",
-    color: Colors.amber,
-  },
-  compareColHeader: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: spacing.xs,
-  },
-  compareColName: {
-    fontSize: fs.md,
-    fontWeight: "700",
-    textAlign: "center",
-  },
+  winnerText: { fontSize: fs.md, fontWeight: "700", color: Colors.green },
+  winnerTextTie: { fontSize: fs.md, fontWeight: "700", color: Colors.amber },
+  compareColHeader: { flex: 1, alignItems: "center", paddingVertical: spacing.xs },
+  compareColName: { fontSize: fs.md, fontWeight: "700", textAlign: "center" },
   compareWinnerBadge: {
     fontSize: 8,
     fontWeight: "700",
@@ -1455,21 +1463,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-  compareStatLabel: {
-    fontSize: fs.xs,
-    fontWeight: "700",
-    color: Colors.textSecondary,
-    textTransform: "uppercase",
-    textAlign: "center",
-    flex: 1,
-  },
-  compareStatValue: {
-    fontSize: fs.md,
-    fontWeight: "700",
-    fontVariant: ["tabular-nums"],
-    width: 50,
-    textAlign: "center",
-  },
+  compareStatLabel: { fontSize: fs.xs, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", textAlign: "center", flex: 1 },
+  compareStatValue: { fontSize: fs.md, fontWeight: "700", fontVariant: ["tabular-nums"], width: 50, textAlign: "center" },
   hintText: { fontSize: fs.md, color: Colors.textMuted, textAlign: "center", paddingVertical: spacing.sm },
 
   // ─── Skill tree ──────────────────────────────────────────────
@@ -1485,60 +1480,12 @@ const styles = StyleSheet.create({
   skillBtnText: { fontSize: 16, fontWeight: "700", color: Colors.accent },
   prereqText: { fontSize: fs.md, color: Colors.text, marginBottom: spacing.xs, lineHeight: 18 },
 
-  // ─── Damage sim ──────────────────────────────────────────────
-  simInputRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  simLabel: { fontSize: fs.md, color: Colors.textSecondary },
-  simInputBox: { backgroundColor: Colors.input, borderWidth: 1, borderColor: Colors.border, borderRadius: 6, paddingHorizontal: 16, paddingVertical: spacing.sm },
-  simInputText: { fontSize: fs.lg, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.text },
-  simButton: { backgroundColor: Colors.accentBg, borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: spacing.sm, alignItems: "center", marginTop: spacing.sm },
-  simButtonText: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent },
-  resultCard: { marginTop: spacing.sm },
-  resultGrid: { flexDirection: "row", flexWrap: "wrap" },
-  resultCell: { width: "50%", alignItems: "center", paddingVertical: spacing.sm },
-  resultValue: { fontSize: fs.xl, fontWeight: "700", fontVariant: ["tabular-nums"], color: Colors.accent },
-  resultLabel: { fontSize: fs.xs, fontWeight: "600", color: Colors.textSecondary, textTransform: "uppercase", marginTop: spacing.xxs },
-
-  // ─── Advisor ─────────────────────────────────────────────────
-  verdictText: { fontSize: 24, fontWeight: "700", textAlign: "center" },
+  // ─── Advisor / Stash ─────────────────────────────────────────
   reasoningText: { fontSize: fs.md, color: Colors.text, textAlign: "center", marginTop: spacing.sm, lineHeight: 18 },
-  advisorCompare: { flexDirection: "row" },
-  advisorCol: { flex: 1, alignItems: "center", paddingVertical: spacing.sm },
-  advisorColTitle: { fontSize: fs.sm, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase" },
-  advisorColValue: { fontSize: 16, fontWeight: "700", color: Colors.text, marginTop: spacing.xs },
   yieldText: { fontSize: fs.md, color: Colors.text, marginBottom: spacing.xs },
 
-  // ─── Risk score ──────────────────────────────────────────────
-  riskPanel: { marginTop: spacing.sm },
-  riskCenter: { alignItems: "center", paddingVertical: spacing.sm },
-  factorRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  factorLabel: { fontSize: fs.md, color: Colors.text },
-  factorImpact: { fontSize: fs.md, fontWeight: "700", fontVariant: ["tabular-nums"] },
-  recommendText: { fontSize: fs.md, color: Colors.accent, textAlign: "center", fontWeight: "600" },
-  disclaimerText: { fontSize: fs.xs, color: Colors.textMuted, textAlign: "center", marginTop: spacing.sm, fontStyle: "italic" },
-
-  // ─── Raid log ────────────────────────────────────────────────
-  addButton: { backgroundColor: Colors.accentBg, borderWidth: 1, borderColor: Colors.accent, borderRadius: 6, padding: spacing.sm, alignItems: "center", marginTop: spacing.sm, marginBottom: spacing.sm },
-  addButtonText: { fontSize: fs.lg, fontWeight: "700", color: Colors.accent },
-  raidCard: { marginBottom: spacing.sm },
-  raidRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  raidInfo: { flex: 1 },
-  raidMap: { fontSize: fs.lg, fontWeight: "600", color: Colors.text },
-  raidDate: { fontSize: fs.sm, color: Colors.textSecondary, marginTop: spacing.xxs },
-  raidOutcome: { fontSize: fs.md, fontWeight: "700" },
-  raidLoot: { fontSize: fs.sm, color: Colors.accent, marginTop: spacing.xs },
-  statCard: { marginBottom: spacing.sm },
-  statLoadout: { fontSize: fs.md, fontWeight: "600", color: Colors.text, marginBottom: spacing.xs },
-  statRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.sm },
-  statText: { fontSize: fs.md, color: Colors.textSecondary },
-  statLoot: { fontSize: fs.md, color: Colors.accent },
-
   // ─── Build Advisor ───────────────────────────────────────────
-  playstyleGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-  },
+  playstyleGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginTop: spacing.xs },
   playstyleButton: {
     flex: 1,
     minWidth: "40%",
@@ -1551,92 +1498,22 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.xs,
   },
-  playstyleIcon: {
-    fontSize: fs.xl,
-    fontWeight: "700",
-    marginBottom: spacing.xxs,
-  },
-  playstyleLabel: {
-    fontSize: fs.sm,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  adviceSummaryPanel: {
-    marginTop: spacing.sm,
-  },
-  adviceSummaryTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: Colors.accent,
-    marginBottom: spacing.xs,
-  },
-  adviceSummaryText: {
-    fontSize: fs.md,
-    color: Colors.text,
-    lineHeight: 18,
-  },
-  adviceSlotTitle: {
-    fontSize: fs.md,
-    fontWeight: "700",
-    color: Colors.accent,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginTop: spacing.md,
-    marginBottom: spacing.xs,
-  },
-  adviceItemCard: {
-    marginBottom: spacing.xs,
-  },
-  adviceItemRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  adviceItemInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  adviceItemRank: {
-    fontSize: fs.md,
-    fontWeight: "700",
-    color: Colors.textMuted,
-    width: 28,
-  },
-  adviceItemTextCol: {
-    flex: 1,
-  },
-  adviceItemName: {
-    fontSize: fs.md,
-    fontWeight: "600",
-    color: Colors.text,
-  },
-  adviceItemReasoning: {
-    fontSize: fs.xs,
-    color: Colors.textSecondary,
-    marginTop: 2,
-    lineHeight: 14,
-  },
-  adviceItemScore: {
-    fontSize: fs.lg,
-    fontWeight: "700",
-    fontVariant: ["tabular-nums"],
-    minWidth: 36,
-    textAlign: "right",
-  },
-  adviceSkillRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  adviceSkillPoints: {
-    fontSize: fs.md,
-    fontWeight: "700",
-    color: Colors.accent,
-    minWidth: 40,
-    textAlign: "right",
-  },
+  playstyleIcon: { fontSize: fs.xl, fontWeight: "700", marginBottom: spacing.xxs },
+  playstyleLabel: { fontSize: fs.sm, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.5 },
+  adviceSummaryPanel: { marginTop: spacing.sm },
+  adviceSummaryTitle: { fontSize: 17, fontWeight: "700", color: Colors.accent, marginBottom: spacing.xs },
+  adviceSummaryText: { fontSize: fs.md, color: Colors.text, lineHeight: 18 },
+  adviceSlotTitle: { fontSize: fs.md, fontWeight: "700", color: Colors.accent, textTransform: "uppercase", letterSpacing: 0.8, marginTop: spacing.md, marginBottom: spacing.xs },
+  adviceItemCard: { marginBottom: spacing.xs },
+  adviceItemRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  adviceItemInfo: { flexDirection: "row", alignItems: "center", flex: 1 },
+  adviceItemRank: { fontSize: fs.md, fontWeight: "700", color: Colors.textMuted, width: 28 },
+  adviceItemTextCol: { flex: 1 },
+  adviceItemName: { fontSize: fs.md, fontWeight: "600", color: Colors.text },
+  adviceItemReasoning: { fontSize: fs.xs, color: Colors.textSecondary, marginTop: 2, lineHeight: 14 },
+  adviceItemScore: { fontSize: fs.lg, fontWeight: "700", fontVariant: ["tabular-nums"], minWidth: 36, textAlign: "right" },
+  adviceSkillRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  adviceSkillPoints: { fontSize: fs.md, fontWeight: "700", color: Colors.accent, minWidth: 40, textAlign: "right" },
 
   // ─── Stash Organizer ────────────────────────────────────────
   stashExpandedPanel: {
