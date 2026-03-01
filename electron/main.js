@@ -474,7 +474,6 @@ app.whenReady().then(() => {
   });
 
   createMainWindow(serverUrl);
-  createOverlayWindow(serverUrl);
   createTray();
 
   // Screen capture for OCR
