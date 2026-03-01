@@ -103,6 +103,8 @@ function createMainWindow(url) {
     if (tray && !app.isQuitting) {
       e.preventDefault();
       mainWindow.hide();
+      // Also hide overlay so it doesn't linger on screen
+      if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
     }
   });
 
@@ -526,6 +528,7 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy();
   if (gameDetector) gameDetector.stop();
   if (screenCapture) screenCapture.destroy();
 });
