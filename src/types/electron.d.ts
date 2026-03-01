@@ -100,6 +100,17 @@ interface ArcDesktopAPI {
 
   /** Restart the app */
   restartApp: () => void;
+
+  // ─── Overlay Lock ──────────────────────────────────────────────
+
+  /** Set overlay locked state */
+  setOverlayLocked: (locked: boolean) => void;
+
+  /** Get current overlay locked state */
+  getOverlayLocked: () => Promise<boolean>;
+
+  /** Listen for overlay lock state changes. Returns unsubscribe function. */
+  onOverlayLockChanged: (cb: (locked: boolean) => void) => () => void;
 }
 
 declare global {

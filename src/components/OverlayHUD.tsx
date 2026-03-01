@@ -33,6 +33,7 @@ export default function OverlayHUD() {
   const { settings: alertSettings } = useAlertSettings();
   const { currentMap } = useMapDetection(maps, bots, activeEvents, allQuests, completedIds);
   const [pipVisible, setPipVisible] = useState(false);
+  const [locked, setLocked] = useState(false);
   const stashOrganizer = useStashOrganizer();
 
   const nextEvent = upcomingEvents[0];
@@ -43,18 +44,29 @@ export default function OverlayHUD() {
   // Has high-value events
   const hasActive = activeEvents.length > 0;
 
-  // Enable click-through by default
+  // Query + subscribe to overlay lock state
   useEffect(() => {
-    window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
+    window.arcDesktop?.getOverlayLocked().then(setLocked);
+    const unsub = window.arcDesktop?.onOverlayLockChanged(setLocked);
+    return () => unsub?.();
   }, []);
+
+  // Enable click-through by default (main process also manages this when lock state changes)
+  useEffect(() => {
+    if (!locked) {
+      window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
+    }
+  }, [locked]);
 
   const handleMouseEnter = useCallback(() => {
+    if (locked) return;
     window.arcDesktop?.setIgnoreMouseEvents(false);
-  }, []);
+  }, [locked]);
 
   const handleMouseLeave = useCallback(() => {
+    if (locked) return;
     window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
-  }, []);
+  }, [locked]);
 
   // Tiered border: imminent → amber pulse, active → accent, default → dim
   const borderStyle = isImminent
@@ -112,6 +124,18 @@ export default function OverlayHUD() {
               </View>
             </>
           )}
+
+          {/* Lock toggle button */}
+          <View style={styles.separator} />
+          <div
+            style={{ WebkitAppRegion: "no-drag", cursor: "pointer", padding: "4px 6px" } as React.CSSProperties}
+            onClick={() => window.arcDesktop?.setOverlayLocked(!locked)}
+            title={locked ? "Unlock overlay (Shift+F9)" : "Lock overlay (Shift+F9)"}
+          >
+            <Text style={[styles.lockIcon, locked && styles.lockIconLocked]}>
+              {locked ? "\uD83D\uDD12" : "\uD83D\uDD13"}
+            </Text>
+          </div>
         </View>
       </div>
       <OverlayQuestProgress
@@ -236,5 +260,12 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: Colors.textSecondary,
     marginTop: 1,
+  },
+  lockIcon: {
+    fontSize: 14,
+    color: "rgba(107, 132, 152, 0.6)",
+  },
+  lockIconLocked: {
+    color: Colors.amber,
   },
 });

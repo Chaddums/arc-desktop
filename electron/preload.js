@@ -90,4 +90,19 @@ contextBridge.exposeInMainWorld("arcDesktop", {
 
   /** Restart the app */
   restartApp: () => ipcRenderer.send("restart-app"),
+
+  // ─── Overlay Lock ──────────────────────────────────────────────
+
+  /** Set overlay locked state */
+  setOverlayLocked: (locked) => ipcRenderer.send("overlay-set-locked", locked),
+
+  /** Get current overlay locked state */
+  getOverlayLocked: () => ipcRenderer.invoke("overlay-get-locked"),
+
+  /** Listen for overlay lock state changes. Returns unsubscribe function. */
+  onOverlayLockChanged: (cb) => {
+    const handler = (_event, locked) => cb(locked);
+    ipcRenderer.on("overlay-lock-changed", handler);
+    return () => ipcRenderer.removeListener("overlay-lock-changed", handler);
+  },
 });

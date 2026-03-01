@@ -14,11 +14,10 @@ const {
 const { pathToFileURL } = require("url");
 const path = require("path");
 const fs = require("fs");
-const { getWindowBounds } = require("./windowFinder");
-
 const DEV = process.argv.includes("--dev");
 const DIST = path.join(__dirname, "..", "dist");
 const GEOMETRY_FILE = path.join(app.getPath("userData"), "window-geometry.json");
+const OVERLAY_SETTINGS_FILE = path.join(app.getPath("userData"), "overlay-settings.json");
 
 // ─── Window Geometry Persistence ─────────────────────────────────
 function loadGeometry() {
@@ -121,75 +120,64 @@ function createMainWindow(url) {
 const OVERLAY_WIDTH = 420;
 const OVERLAY_MARGIN = 12;
 
-// Cached game window bounds for overlay positioning
-let gameWindowBounds = null;
-let overlayTrackTimer = null;
+let overlayLocked = false;
 
-function getOverlayDisplay() {
-  // Use the display where the main window lives, fall back to cursor, then primary
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    return screen.getDisplayMatching(mainWindow.getBounds());
-  }
-  return screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+// ─── Overlay Settings Persistence ────────────────────────────────
+function loadOverlaySettings() {
+  try {
+    if (fs.existsSync(OVERLAY_SETTINGS_FILE)) {
+      return JSON.parse(fs.readFileSync(OVERLAY_SETTINGS_FILE, "utf8"));
+    }
+  } catch { /* ignore */ }
+  return null;
 }
 
-function positionOverlayToRect(rect, width, height) {
-  if (!overlayWindow) return;
-  // Pin to top-right of the given rect
-  overlayWindow.setBounds({
-    x: rect.x + rect.width - Math.round(width) - OVERLAY_MARGIN,
-    y: rect.y + OVERLAY_MARGIN,
-    width: Math.round(width),
-    height: Math.round(height),
+function saveOverlaySettings(settings) {
+  try {
+    const current = loadOverlaySettings() || {};
+    fs.writeFileSync(OVERLAY_SETTINGS_FILE, JSON.stringify({ ...current, ...settings }));
+  } catch { /* ignore */ }
+}
+
+function isPositionOnScreen(x, y) {
+  const displays = screen.getAllDisplays();
+  return displays.some((d) => {
+    const { x: dx, y: dy, width: dw, height: dh } = d.workArea;
+    return x >= dx && x < dx + dw && y >= dy && y < dy + dh;
   });
 }
 
-function positionOverlay(width, height) {
-  if (!overlayWindow) return;
-  // If we have game window bounds, pin to the game window
-  if (gameWindowBounds) {
-    positionOverlayToRect(gameWindowBounds, width, height);
-    return;
-  }
-  // Fallback: top-right of the display
-  const display = getOverlayDisplay();
-  const { x, y, width: dw } = display.workArea;
-  positionOverlayToRect({ x, y, width: dw, height: 0 }, width, height);
-}
-
-// Poll game window position and reposition overlay to track it
-function startOverlayTracking() {
-  stopOverlayTracking();
-  overlayTrackTimer = setInterval(async () => {
-    if (!overlayWindow || overlayWindow.isDestroyed()) {
-      stopOverlayTracking();
-      return;
-    }
-    const bounds = await getWindowBounds("PioneerGame");
-    if (bounds && bounds.width > 0 && bounds.height > 0) {
-      gameWindowBounds = bounds;
-      const oBounds = overlayWindow.getBounds();
-      positionOverlayToRect(bounds, oBounds.width, oBounds.height);
-    }
-  }, 2000);
-}
-
-function stopOverlayTracking() {
-  if (overlayTrackTimer) {
-    clearInterval(overlayTrackTimer);
-    overlayTrackTimer = null;
-  }
+function getDefaultOverlayPosition(width, height) {
+  const display = mainWindow && !mainWindow.isDestroyed()
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const { x, y, width: dw, height: dh } = display.workArea;
+  return {
+    x: x + OVERLAY_MARGIN,
+    y: y + dh - height - OVERLAY_MARGIN,
+  };
 }
 
 function createOverlayWindow(url) {
+  const saved = loadOverlaySettings();
+  const initHeight = 64;
+  const startPos = (saved && isPositionOnScreen(saved.x, saved.y))
+    ? { x: saved.x, y: saved.y }
+    : getDefaultOverlayPosition(OVERLAY_WIDTH, initHeight);
+
+  overlayLocked = !!(saved && saved.locked);
+
   overlayWindow = new BrowserWindow({
     width: OVERLAY_WIDTH,
-    height: 64,
+    height: initHeight,
+    x: startPos.x,
+    y: startPos.y,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
+    movable: !overlayLocked,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -201,8 +189,24 @@ function createOverlayWindow(url) {
   // Set always-on-top level for in-game overlay
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
 
-  // Position at top-right of primary display
-  positionOverlay(OVERLAY_WIDTH, 64);
+  // Persist position on drag (debounced)
+  let overlayMoveTimer = null;
+  overlayWindow.on("move", () => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    clearTimeout(overlayMoveTimer);
+    overlayMoveTimer = setTimeout(() => {
+      if (!overlayWindow || overlayWindow.isDestroyed()) return;
+      const { x, y } = overlayWindow.getBounds();
+      saveOverlaySettings({ x, y });
+    }, 500);
+  });
+
+  overlayWindow.once("ready-to-show", () => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      applyOverlayLockState();
+      overlayWindow.webContents.send("overlay-lock-changed", overlayLocked);
+    }
+  });
 
   overlayWindow.on("closed", () => {
     overlayWindow = null;
@@ -216,23 +220,13 @@ function createOverlayWindow(url) {
 async function toggleMode() {
   if (currentMode === "main") {
     currentMode = "overlay";
-    // Try to find the game window before showing overlay
-    const gameBounds = await getWindowBounds("PioneerGame");
-    if (gameBounds && gameBounds.width > 0) {
-      gameWindowBounds = gameBounds;
-    }
     if (mainWindow) mainWindow.hide();
     if (!overlayWindow) createOverlayWindow(serverUrl);
     if (overlayWindow) {
-      positionOverlay(overlayWindow.getBounds().width, overlayWindow.getBounds().height);
       overlayWindow.show();
     }
-    // Start tracking game window position
-    startOverlayTracking();
   } else {
     currentMode = "main";
-    stopOverlayTracking();
-    gameWindowBounds = null;
     if (overlayWindow) overlayWindow.hide();
     if (!mainWindow) createMainWindow(serverUrl);
     if (mainWindow) {
@@ -278,8 +272,15 @@ function updateTrayMenu() {
   const gameRunning = gameDetector ? gameDetector.isRunning : false;
   const modeLabel = currentMode === "main" ? "Switch to Overlay" : "Switch to Desktop";
 
+  const lockLabel = overlayLocked ? "Unlock Overlay (Shift+F9)" : "Lock Overlay (Shift+F9)";
+
   const contextMenu = Menu.buildFromTemplate([
     { label: modeLabel, click: toggleMode },
+    {
+      label: lockLabel,
+      enabled: currentMode === "overlay",
+      click: () => setOverlayLock(!overlayLocked),
+    },
     { type: "separator" },
     {
       label: mainWindow && mainWindow.isVisible() ? "Hide Window" : "Show Window",
@@ -357,9 +358,16 @@ ipcMain.on("set-ignore-mouse-events", (event, ignore, opts) => {
 });
 
 ipcMain.on("overlay-resize", (_event, width, height) => {
-  if (overlayWindow) {
-    positionOverlay(width, height);
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const bounds = overlayWindow.getBounds();
+  let newY = bounds.y;
+  // If bottom edge would exceed screen, push y upward (overlay grows up from bottom)
+  const display = screen.getDisplayMatching(bounds);
+  const screenBottom = display.workArea.y + display.workArea.height;
+  if (newY + height > screenBottom) {
+    newY = screenBottom - height;
   }
+  overlayWindow.setBounds({ x: bounds.x, y: newY, width: Math.round(width), height: Math.round(height) });
 });
 
 ipcMain.on("event-started", (_event, eventData) => {
@@ -389,6 +397,33 @@ ipcMain.on("event-started", (_event, eventData) => {
 ipcMain.on("update-alert-settings", (_event, settings) => {
   alertSettings = { ...alertSettings, ...settings };
 });
+
+// ─── Overlay Lock ───────────────────────────────────────────────
+function applyOverlayLockState() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.setMovable(!overlayLocked);
+  if (overlayLocked) {
+    overlayWindow.setIgnoreMouseEvents(true, { forward: false });
+  } else {
+    overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  }
+}
+
+function setOverlayLock(locked) {
+  overlayLocked = locked;
+  applyOverlayLockState();
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send("overlay-lock-changed", overlayLocked);
+  }
+  saveOverlaySettings({ locked: overlayLocked });
+  updateTrayMenu();
+}
+
+ipcMain.on("overlay-set-locked", (_event, locked) => {
+  setOverlayLock(!!locked);
+});
+
+ipcMain.handle("overlay-get-locked", () => overlayLocked);
 
 // ─── OCR IPC Handlers ───────────────────────────────────────────
 ipcMain.on("start-ocr", () => {
@@ -480,8 +515,9 @@ app.whenReady().then(() => {
     // gameDetector.js not yet created — Phase 2
   }
 
-  // F9 = toggle overlay
+  // F9 = toggle overlay, Shift+F9 = toggle overlay lock
   globalShortcut.register("F9", toggleMode);
+  globalShortcut.register("Shift+F9", () => setOverlayLock(!overlayLocked));
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow(serverUrl);
@@ -490,7 +526,6 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
-  stopOverlayTracking();
   if (gameDetector) gameDetector.stop();
   if (screenCapture) screenCapture.destroy();
 });
