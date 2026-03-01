@@ -199,10 +199,10 @@ export const spacing = {
   xxs: 2,
   xs: 4,
   sm: 6,
-  md: 10,
-  lg: 14,
-  xl: 20,
-  xxl: 28,
+  md: 8,
+  lg: 10,
+  xl: 14,
+  xxl: 20,
 } as const;
 
 // ─── Typography Scale ───────────────────────────────────────────
@@ -302,7 +302,7 @@ export const viewPresets = {
   /** Scroll content container (tight padding) */
   scrollContent: {
     padding: spacing.md,
-    paddingBottom: spacing.xl,
+    paddingBottom: 12,
   } as ViewStyle,
 
   /** Quick nav row */

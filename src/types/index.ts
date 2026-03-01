@@ -379,6 +379,8 @@ export interface SquadMember {
   suggestedRole?: string;
   activeQuestIds?: string[];
   completedQuestIds?: string[];
+  weapon?: string;
+  gadget?: string;
 }
 
 export interface SquadInfo {

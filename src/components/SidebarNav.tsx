@@ -50,13 +50,13 @@ export default function SidebarNav({ items, activeKey, onSelect }: SidebarNavPro
 
 const styles = StyleSheet.create({
   sidebar: {
-    width: 72,
+    width: 56,
     borderRightWidth: 1,
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.sm,
     alignItems: "center",
   },
   brand: {
-    fontSize: fs.lg,
+    fontSize: 13,
     fontWeight: "700",
     letterSpacing: 3,
   },
@@ -67,16 +67,16 @@ const styles = StyleSheet.create({
     marginTop: -2,
   },
   divider: {
-    width: 32,
+    width: 28,
     height: 1,
-    marginVertical: spacing.lg,
+    marginVertical: spacing.sm,
   },
   navItem: {
-    width: 56,
+    width: 44,
     alignItems: "center",
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
     borderRadius: 6,
-    marginBottom: spacing.xs,
+    marginBottom: spacing.xxs,
     position: "relative",
   },
   navItemActive: {},

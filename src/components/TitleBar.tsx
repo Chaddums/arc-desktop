@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
   bar: {
     flexDirection: "row",
     alignItems: "center",
-    height: 32,
+    height: 28,
     borderBottomWidth: 1,
     paddingLeft: 12,
   },
@@ -116,11 +116,11 @@ const styles = StyleSheet.create({
   controls: {
     flexDirection: "row",
     alignItems: "center",
-    height: 32,
+    height: 28,
   },
   controlBtn: {
     width: 46,
-    height: 32,
+    height: 28,
     alignItems: "center",
     justifyContent: "center",
   },

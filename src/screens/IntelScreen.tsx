@@ -657,7 +657,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxs,
   },
   scroll: { flex: 1 },
-  scrollContent: { padding: spacing.md, paddingBottom: spacing.xl },
+  scrollContent: { padding: spacing.md, paddingBottom: 12 },
   sectionTitle: {
     fontSize: fs.md,
     fontWeight: "700",

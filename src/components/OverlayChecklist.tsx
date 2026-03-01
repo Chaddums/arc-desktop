@@ -3,34 +3,13 @@
  * Only visible when items have been pinned.
  */
 
-import React, { useEffect } from "react";
+import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { useLoadoutChecklist } from "../hooks/useLoadoutChecklist";
 import { Colors } from "../theme";
 
-const STRIP_HEIGHT = 52;
-const ROW_HEIGHT = 28;
-const HEADER_HEIGHT = 24;
-const PADDING = 8;
-
 export default function OverlayChecklist() {
   const { items, toggleItem, clearChecked } = useLoadoutChecklist();
-
-  // Resize overlay window when checklist changes
-  useEffect(() => {
-    if (!window.arcDesktop) return;
-    if (items.length === 0) {
-      window.arcDesktop.resizeOverlay(420, STRIP_HEIGHT + PADDING * 2);
-    } else {
-      const height =
-        STRIP_HEIGHT +
-        PADDING +
-        HEADER_HEIGHT +
-        items.length * ROW_HEIGHT +
-        PADDING;
-      window.arcDesktop.resizeOverlay(420, Math.min(height, 400));
-    }
-  }, [items.length]);
 
   if (items.length === 0) return null;
 
@@ -102,7 +81,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
-    height: ROW_HEIGHT,
+    height: 28,
   },
   checkbox: {
     width: 16,

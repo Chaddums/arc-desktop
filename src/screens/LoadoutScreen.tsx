@@ -1193,7 +1193,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxs,
   },
   scroll: { flex: 1 },
-  scrollContent: { padding: spacing.md, paddingBottom: spacing.xl },
+  scrollContent: { padding: spacing.md, paddingBottom: 12 },
   sectionTitle: { fontSize: fs.md, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 1, marginBottom: spacing.sm, marginTop: spacing.xs },
   subHeading: { fontSize: fs.sm, fontWeight: "700", color: Colors.textSecondary, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: spacing.xs },
 

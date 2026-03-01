@@ -111,6 +111,14 @@ interface ArcDesktopAPI {
 
   /** Listen for overlay lock state changes. Returns unsubscribe function. */
   onOverlayLockChanged: (cb: (locked: boolean) => void) => () => void;
+
+  // ─── Overlay Drag ──────────────────────────────────────────────
+
+  /** Start IPC-based overlay drag */
+  overlayStartDrag: () => void;
+
+  /** Stop IPC-based overlay drag */
+  overlayStopDrag: () => void;
 }
 
 declare global {

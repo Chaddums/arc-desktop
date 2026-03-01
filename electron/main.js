@@ -1,6 +1,7 @@
 const {
   app,
   BrowserWindow,
+  dialog,
   protocol,
   net,
   globalShortcut,
@@ -14,6 +15,9 @@ const {
 const { pathToFileURL } = require("url");
 const path = require("path");
 const fs = require("fs");
+// Disable GPU to prevent DXGI_ERROR_DEVICE_REMOVED crashes in games
+app.disableHardwareAcceleration();
+
 const DEV = process.argv.includes("--dev");
 const DIST = path.join(__dirname, "..", "dist");
 const GEOMETRY_FILE = path.join(app.getPath("userData"), "window-geometry.json");
@@ -63,13 +67,15 @@ let ocrSettings = {
 function createMainWindow(url) {
   const saved = loadGeometry();
 
+  const onScreen = saved && isPositionOnScreen(saved.x, saved.y);
+
   mainWindow = new BrowserWindow({
-    width: saved?.width ?? 1200,
-    height: saved?.height ?? 800,
-    x: saved?.x,
-    y: saved?.y,
+    width: saved?.width ?? 900,
+    height: saved?.height ?? 650,
+    x: onScreen ? saved.x : undefined,
+    y: onScreen ? saved.y : undefined,
     minWidth: 380,
-    minHeight: 600,
+    minHeight: 500,
     backgroundColor: "#0a0e12",
     autoHideMenuBar: true,
     frame: false,
@@ -84,9 +90,14 @@ function createMainWindow(url) {
 
   if (saved?.isMaximized) mainWindow.maximize();
 
-  mainWindow.once("ready-to-show", () => {
+  let shown = false;
+  const showOnce = () => {
+    if (shown || !mainWindow || mainWindow.isDestroyed()) return;
+    shown = true;
     if (currentMode === "main") mainWindow.show();
-  });
+  };
+  mainWindow.once("ready-to-show", showOnce);
+  setTimeout(showOnce, 5000); // fallback if content fails to load
 
   // Save geometry on move/resize (debounced)
   let geoTimer = null;
@@ -150,19 +161,39 @@ function isPositionOnScreen(x, y) {
 }
 
 function getDefaultOverlayPosition(width, height) {
-  const display = mainWindow && !mainWindow.isDestroyed()
-    ? screen.getDisplayMatching(mainWindow.getBounds())
-    : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  // Prefer cursor position — user is likely looking at the game when pressing F9
+  const cursorPoint = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursorPoint);
   const { x, y, width: dw, height: dh } = display.workArea;
   return {
-    x: x + OVERLAY_MARGIN,
+    x: x + dw - width - OVERLAY_MARGIN,
     y: y + dh - height - OVERLAY_MARGIN,
   };
 }
 
+/**
+ * Find the game window and position the overlay at its bottom-right,
+ * aligned with the Steam overlay icon area.
+ */
+async function positionOverlayOnGame() {
+  try {
+    const { getWindowBounds } = require("./windowFinder");
+    const gameBounds = await getWindowBounds("PioneerGame");
+    if (gameBounds) {
+      const initHeight = 200;
+      saveOverlaySettings({
+        x: gameBounds.x + gameBounds.width - OVERLAY_WIDTH - OVERLAY_MARGIN,
+        y: gameBounds.y + gameBounds.height - initHeight - OVERLAY_MARGIN,
+      });
+      return;
+    }
+  } catch {}
+  // Fallback: saved position or cursor-based default will be used
+}
+
 function createOverlayWindow(url) {
   const saved = loadOverlaySettings();
-  const initHeight = 64;
+  const initHeight = 200;
   const startPos = (saved && isPositionOnScreen(saved.x, saved.y))
     ? { x: saved.x, y: saved.y }
     : getDefaultOverlayPosition(OVERLAY_WIDTH, initHeight);
@@ -188,8 +219,9 @@ function createOverlayWindow(url) {
     },
   });
 
-  // Set always-on-top level for in-game overlay
-  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  // "floating" stays above normal windows and most games without fighting
+  // the GPU the way "screen-saver" does (avoids DXGI_ERROR_DEVICE_REMOVED)
+  overlayWindow.setAlwaysOnTop(true, "floating");
 
   // Persist position on drag (debounced)
   let overlayMoveTimer = null;
@@ -207,6 +239,8 @@ function createOverlayWindow(url) {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       applyOverlayLockState();
       overlayWindow.webContents.send("overlay-lock-changed", overlayLocked);
+      // Show once content is ready (toggleMode may have requested it before load)
+      if (currentMode === "overlay") overlayWindow.show();
     }
   });
 
@@ -222,16 +256,27 @@ function createOverlayWindow(url) {
 async function toggleMode() {
   if (currentMode === "main") {
     currentMode = "overlay";
-    if (mainWindow) mainWindow.hide();
-    if (!overlayWindow) createOverlayWindow(serverUrl);
-    if (overlayWindow) {
+    // Hide main first, ensure it's gone before overlay appears
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.hide();
+    }
+    if (!overlayWindow || overlayWindow.isDestroyed()) {
+      // Try to position on the game's display
+      await positionOverlayOnGame();
+      // First creation — ready-to-show handler will call .show()
+      createOverlayWindow(serverUrl);
+    } else {
       overlayWindow.show();
     }
   } else {
     currentMode = "main";
-    if (overlayWindow) overlayWindow.hide();
-    if (!mainWindow) createMainWindow(serverUrl);
-    if (mainWindow) {
+    // Hide overlay first
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.hide();
+    }
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createMainWindow(serverUrl);
+    } else {
       mainWindow.show();
       mainWindow.focus();
     }
@@ -342,7 +387,7 @@ ipcMain.handle("window-is-maximized", (event) => {
 ipcMain.on("window-set-size", (_event, preset) => {
   if (!mainWindow) return;
   const sizes = {
-    default: [1200, 800],
+    default: [900, 650],
     large: [1440, 900],
     xl: [1680, 1050],
   };
@@ -382,15 +427,7 @@ ipcMain.on("event-started", (_event, eventData) => {
   // Clear from set after 10 minutes to allow re-notification
   setTimeout(() => notifiedEvents.delete(key), 10 * 60 * 1000);
 
-  if (Notification.isSupported()) {
-    const notif = new Notification({
-      title: "ARC View - Event Started",
-      body: `${eventData.name} on ${eventData.map}`,
-      silent: true,
-    });
-    notif.show();
-  }
-
+  // Audio only — overlay toast handles the visual notification
   if (alertSettings.audioAlerts) {
     broadcast("play-alert-sound");
   }
@@ -404,11 +441,8 @@ ipcMain.on("update-alert-settings", (_event, settings) => {
 function applyOverlayLockState() {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   overlayWindow.setMovable(!overlayLocked);
-  if (overlayLocked) {
-    overlayWindow.setIgnoreMouseEvents(true, { forward: false });
-  } else {
-    overlayWindow.setIgnoreMouseEvents(true, { forward: true });
-  }
+  // Always forward so the renderer can detect hover on the lock button
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
 }
 
 function setOverlayLock(locked) {
@@ -426,6 +460,41 @@ ipcMain.on("overlay-set-locked", (_event, locked) => {
 });
 
 ipcMain.handle("overlay-get-locked", () => overlayLocked);
+
+// ─── Overlay Drag (IPC-based, works with setIgnoreMouseEvents) ───
+let dragInterval = null;
+let dragOffset = null;
+
+ipcMain.on("overlay-start-drag", () => {
+  if (!overlayWindow || overlayWindow.isDestroyed() || overlayLocked) return;
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = overlayWindow.getBounds();
+  dragOffset = { x: cursor.x - bounds.x, y: cursor.y - bounds.y };
+
+  if (dragInterval) clearInterval(dragInterval);
+  dragInterval = setInterval(() => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || !dragOffset) {
+      clearInterval(dragInterval);
+      dragInterval = null;
+      return;
+    }
+    const pos = screen.getCursorScreenPoint();
+    overlayWindow.setPosition(pos.x - dragOffset.x, pos.y - dragOffset.y);
+  }, 16); // ~60fps
+});
+
+ipcMain.on("overlay-stop-drag", () => {
+  if (dragInterval) {
+    clearInterval(dragInterval);
+    dragInterval = null;
+  }
+  dragOffset = null;
+  // Save final position
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    const { x, y } = overlayWindow.getBounds();
+    saveOverlaySettings({ x, y });
+  }
+});
 
 // ─── OCR IPC Handlers ───────────────────────────────────────────
 ipcMain.on("start-ocr", () => {
@@ -458,6 +527,20 @@ ipcMain.handle("test-ocr-capture", async () => {
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
+
+// ─── Single Instance Lock ────────────────────────────────────────
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    // Focus existing window when user tries to launch again
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
 
 // ─── App Lifecycle ──────────────────────────────────────────────
 app.whenReady().then(() => {
@@ -495,13 +578,6 @@ app.whenReady().then(() => {
       broadcast("game-status", running);
       updateTrayMenu();
 
-      // Auto-switch: game starts → overlay, game stops → main
-      if (running && currentMode === "main") {
-        toggleMode();
-      } else if (!running && currentMode === "overlay") {
-        toggleMode();
-      }
-
       // OCR: start scanning when game runs, stop when it exits
       if (screenCapture && ocrSettings.enabled) {
         if (running) {
@@ -536,3 +612,5 @@ app.on("window-all-closed", () => {
   // Keep running if tray exists
   if (!tray && process.platform !== "darwin") app.quit();
 });
+
+} // end single-instance else

@@ -143,6 +143,24 @@ export function useSquad() {
     [squad]
   );
 
+  // Update a member's weapon + gadget
+  const updateMemberLoadout = useCallback(
+    (accountId: string, weapon: string, gadget: string) => {
+      if (!squad) return;
+      const updated = {
+        ...squad,
+        members: squad.members.map((m) =>
+          m.accountId === accountId
+            ? { ...m, weapon, gadget }
+            : m
+        ),
+      };
+      setSquad(updated);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch(() => {});
+    },
+    [squad]
+  );
+
   // Remove a quest from a member entirely
   const removeMemberQuest = useCallback(
     (accountId: string, questId: string) => {
@@ -178,6 +196,7 @@ export function useSquad() {
     leaveSquad,
     roleAdvisory,
     updateMemberQuests,
+    updateMemberLoadout,
     toggleMemberQuest,
     addMemberQuest,
     removeMemberQuest,

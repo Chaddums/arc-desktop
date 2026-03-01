@@ -99,6 +99,12 @@ contextBridge.exposeInMainWorld("arcDesktop", {
   /** Get current overlay locked state */
   getOverlayLocked: () => ipcRenderer.invoke("overlay-get-locked"),
 
+  /** Start dragging the overlay window (call on mousedown) */
+  overlayStartDrag: () => ipcRenderer.send("overlay-start-drag"),
+
+  /** Stop dragging the overlay window (call on mouseup) */
+  overlayStopDrag: () => ipcRenderer.send("overlay-stop-drag"),
+
   /** Listen for overlay lock state changes. Returns unsubscribe function. */
   onOverlayLockChanged: (cb) => {
     const handler = (_event, locked) => cb(locked);
