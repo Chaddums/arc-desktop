@@ -27,7 +27,8 @@ export type SectionId =
   | "traderContext"
   | "mapSelectorContext"
   | "workshopContext"
-  | "mapInspectorContext";
+  | "mapInspectorContext"
+  | "skillTreeContext";
 
 export type MenuState =
   | "none"
@@ -36,7 +37,8 @@ export type MenuState =
   | "trader_menu"
   | "workshop"
   | "map_selector"
-  | "map_inspector";
+  | "map_inspector"
+  | "skill_tree";
 
 /** Which menu state triggers each context section */
 export const CONTEXT_SECTION_TRIGGERS: Partial<Record<SectionId, MenuState[]>> = {
@@ -45,6 +47,7 @@ export const CONTEXT_SECTION_TRIGGERS: Partial<Record<SectionId, MenuState[]>> =
   mapSelectorContext: ["map_selector"],
   workshopContext: ["workshop"],
   mapInspectorContext: ["map_inspector"],
+  skillTreeContext: ["skill_tree"],
 };
 
 export interface OverlaySections {
@@ -60,6 +63,7 @@ export interface OverlaySections {
   mapSelectorContext: boolean;
   workshopContext: boolean;
   mapInspectorContext: boolean;
+  skillTreeContext: boolean;
 }
 
 export interface SectionPosition {
@@ -82,6 +86,12 @@ export interface HudColorConfig {
   headerColor: string;
 }
 
+export interface GameResolution {
+  width: number;
+  height: number;
+  label: string;
+}
+
 export interface OverlayConfig {
   sections: OverlaySections;
   sectionConfigs: SectionConfig[];
@@ -89,6 +99,7 @@ export interface OverlayConfig {
   scale: number;
   anchor: AnchorPosition | null;
   hudColors: HudColorConfig | null;
+  gameResolution: GameResolution;
 }
 
 const DEFAULT_SECTION_CONFIGS: SectionConfig[] = [
@@ -104,6 +115,16 @@ const DEFAULT_SECTION_CONFIGS: SectionConfig[] = [
   { id: "mapSelectorContext", enabled: true, order: 9, locked: false },
   { id: "workshopContext", enabled: true, order: 10, locked: false },
   { id: "mapInspectorContext", enabled: true, order: 11, locked: false },
+  { id: "skillTreeContext", enabled: true, order: 12, locked: false },
+];
+
+export const RESOLUTION_PRESETS: GameResolution[] = [
+  { width: 1920, height: 1080, label: "1920x1080 (Full HD)" },
+  { width: 2560, height: 1440, label: "2560x1440 (QHD)" },
+  { width: 3840, height: 2160, label: "3840x2160 (4K)" },
+  { width: 1280, height: 720, label: "1280x720 (HD)" },
+  { width: 2560, height: 1080, label: "2560x1080 (Ultrawide)" },
+  { width: 3440, height: 1440, label: "3440x1440 (Ultrawide)" },
 ];
 
 const DEFAULTS: OverlayConfig = {
@@ -120,12 +141,14 @@ const DEFAULTS: OverlayConfig = {
     mapSelectorContext: true,
     workshopContext: true,
     mapInspectorContext: true,
+    skillTreeContext: true,
   },
   sectionConfigs: DEFAULT_SECTION_CONFIGS,
   opacity: 0.92,
   scale: 1.0,
   anchor: null,
   hudColors: null,
+  gameResolution: { width: 1920, height: 1080, label: "1920x1080 (Full HD)" },
 };
 
 /** All known section IDs in default order */
@@ -133,6 +156,7 @@ const ALL_SECTION_IDS: SectionId[] = [
   "eventFeed", "activeQuests", "squadLoadout", "mapBriefing",
   "questTracker", "buildAdvice", "dailyQuests",
   "inventoryContext", "traderContext", "mapSelectorContext", "workshopContext", "mapInspectorContext",
+  "skillTreeContext",
 ];
 
 /** Derive sectionConfigs from legacy sections booleans */
@@ -289,6 +313,13 @@ export function useOverlayConfig() {
     [config, persist],
   );
 
+  const updateGameResolution = useCallback(
+    (resolution: GameResolution) => {
+      persist({ ...config, gameResolution: resolution });
+    },
+    [config, persist],
+  );
+
   const resetToDefaults = useCallback(() => {
     persist(DEFAULTS);
   }, [persist]);
@@ -303,6 +334,7 @@ export function useOverlayConfig() {
     updateSectionPosition,
     updateSectionWidth,
     updateHudColors,
+    updateGameResolution,
     resetToDefaults,
   };
 }

@@ -25,7 +25,9 @@ import type {
   SectionId,
   SectionConfig,
   HudColorConfig,
+  GameResolution,
 } from "../hooks/useOverlayConfig";
+import { RESOLUTION_PRESETS } from "../hooks/useOverlayConfig";
 import OverlayPreview from "../components/OverlayPreview";
 import OverlayCornerPicker from "../components/OverlayCornerPicker";
 
@@ -55,6 +57,7 @@ const SECTION_LABELS: Record<SectionId, { label: string; desc: string }> = {
   mapSelectorContext: { label: "Map Select Intel", desc: "Quest alignment & events (shows in map select)" },
   workshopContext: { label: "Workshop Guide", desc: "Workbench listing & crafts (shows in workshop)" },
   mapInspectorContext: { label: "Map Objectives", desc: "Filtered quest objectives (shows on map view)" },
+  skillTreeContext: { label: "Skill Tree Advisor", desc: "Build-aware skill recommendations (shows in skill tree)" },
 };
 
 const OPACITY_STEPS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
@@ -109,6 +112,7 @@ export default function OverlayBuilderScreen() {
     updateSectionPosition,
     updateSectionWidth,
     updateHudColors,
+    updateGameResolution,
     resetToDefaults,
   } = useOverlayConfig();
   const [activeScene, setActiveScene] = useState("gameplay");
@@ -194,20 +198,13 @@ export default function OverlayBuilderScreen() {
 
   // ─── Apply to Overlay ────────────────────────────────────────
   const handleApply = () => {
-    if (config.anchor && window.arcDesktop?.setOverlayPosition) {
-      window.arcDesktop.setOverlayPosition(config.anchor);
-    }
-    if (window.arcDesktop?.setOverlayAppearance) {
-      window.arcDesktop.setOverlayAppearance({
-        opacity: config.opacity,
-        scale: config.scale,
-      });
-    }
     if (window.arcDesktop?.setOverlayConfig) {
       window.arcDesktop.setOverlayConfig({
         sectionConfigs: config.sectionConfigs,
         hudColors: config.hudColors,
         sections: config.sections,
+        opacity: config.opacity,
+        scale: config.scale,
       });
     }
   };
@@ -263,6 +260,7 @@ export default function OverlayBuilderScreen() {
             {
               backgroundColor: C.bgDeep,
               borderColor: C.border,
+              aspectRatio: config.gameResolution.width / config.gameResolution.height,
             },
             !isWide && styles.previewPaneStacked,
           ]}
@@ -275,6 +273,7 @@ export default function OverlayBuilderScreen() {
               scale={config.scale}
               anchor={config.anchor}
               hudColors={config.hudColors}
+              gameResolution={config.gameResolution}
               onSectionPositionChange={updateSectionPosition}
               onSectionWidthChange={updateSectionWidth}
             />
@@ -370,6 +369,44 @@ export default function OverlayBuilderScreen() {
                 </div>
               );
             })}
+          </View>
+
+          {/* Game Resolution */}
+          <View style={[styles.controlSection, { borderColor: C.border }]}>
+            <Text style={[styles.controlTitle, { color: C.textSecondary }]}>
+              GAME RESOLUTION
+            </Text>
+            <Text style={[styles.resolutionHint, { color: C.textMuted }]}>
+              Match this to your Arc Raiders display resolution for accurate positioning
+            </Text>
+            <View style={styles.resolutionGrid}>
+              {RESOLUTION_PRESETS.map((res) => {
+                const active = config.gameResolution.width === res.width && config.gameResolution.height === res.height;
+                return (
+                  <TouchableOpacity
+                    key={res.label}
+                    onPress={() => updateGameResolution(res)}
+                    style={[
+                      styles.resolutionBtn,
+                      { borderColor: C.border },
+                      active && { borderColor: C.accent, backgroundColor: C.accentBg },
+                    ]}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[
+                      styles.resolutionText,
+                      { color: C.textSecondary },
+                      active && { color: C.accent },
+                    ]}>
+                      {res.width}x{res.height}
+                    </Text>
+                    <Text style={[styles.resolutionLabel, { color: C.textMuted }]}>
+                      {res.label.includes("(") ? res.label.split("(")[1].replace(")", "") : ""}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
 
           {/* Appearance */}
@@ -668,6 +705,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
+  // ─── Resolution Picker ────────────────────────────────────
+  resolutionHint: {
+    fontSize: fontSize.xs,
+    marginBottom: 8,
+  },
+  resolutionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  resolutionBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderRadius: 4,
+    alignItems: "center",
+  },
+  resolutionText: {
+    fontSize: fontSize.sm,
+    fontWeight: "700",
+    fontFamily: fonts.mono,
+  },
+  resolutionLabel: {
+    fontSize: 9,
+    marginTop: 1,
+  },
   // ─── Scene Picker ──────────────────────────────────────────
   scenePicker: {
     flexDirection: "row",
@@ -702,11 +765,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 6,
     overflow: "hidden",
-    minHeight: 400,
     position: "relative",
   },
   previewPaneStacked: {
-    minHeight: 320,
     marginBottom: 12,
   },
   // ─── Control Panel ────────────────────────────────────────

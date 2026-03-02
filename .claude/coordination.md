@@ -1,8 +1,8 @@
 # Session Coordination
 
 ## Session A
-- Status: idle (completed)
-- Last work: Overlay config persistence fixes, Frank mascot, dev launcher simplification
+- Status: active
+- Working on: Skill Tree Build Advisor (attribute-based scoring, dead perk detection, overlay panel)
 - Last check-in: 2026-03-02
 
 ## Session B
@@ -11,20 +11,31 @@
 - Last check-in: 2026-03-01
 
 ## Recent Changes (Session A — 2026-03-02)
-- Fixed overlay config not loading on mount (sections reset on F9)
-- Fixed disabled sections still rendering in HUD
-- Fixed position picker UX (nullable anchor, deselection, gated on all enabled)
-- Fixed z-fighting in builder preview (CSS background-image)
-- Fixed stale drag positions hiding event feed card
-- Added Frank mascot: taskbar/tray icon (ARC teal), Intel header
-- Removed Metro dev server dependency — dev mode loads from built dist
-- Added arc_view.bat/vbs launcher (silent, no console), replaces arc-dev.vbs
-- Added app reset (--reset flag + IPC handler)
+- **Skill Tree Build Advisor** — replaced keyword-matching skill recommendations with attribute-based scoring
+- New `src/data/skillNodeAttributes.ts` — 43-node static mapping (dps/tank/support/stealth scores + tags)
+- New `src/components/OverlaySkillTreeContext.tsx` — context overlay panel for skill tree menu
+- Dead perk detection: cross-references allocated perks with equipped gear (shield_synergy, stealth, melee, looting, team_support, downed)
+- Added `skill_tree` MenuState, `skillTreeContext` SectionId across overlay config/sections/builder
+- Added skill tree OCR pattern to useMenuDetection
+- Fixed OverlayHUD section migration (new sections now appear without config reset)
+- Added SkillNode.description, impactedSkill, iconName fields to types
+- Previous session: overlay config fixes, Frank mascot, dev launcher, app reset
 
-## Claimed Files
-No files currently claimed — Session A complete.
+## Claimed Files (Session A)
+- src/data/skillNodeAttributes.ts (NEW)
+- src/components/OverlaySkillTreeContext.tsx (NEW)
+- src/hooks/useBuildAdvisor.ts
+- src/hooks/useOverlayConfig.ts
+- src/hooks/useOverlaySections.ts
+- src/hooks/useMenuDetection.ts
+- src/components/OverlayHUD.tsx
+- src/screens/LoadoutScreen.tsx
+- src/screens/OverlayBuilderScreen.tsx
+- src/types/index.ts
 
 ## Notes
 - Dev workflow: double-click `arc_view.bat` (builds + launches, no server needed)
+- **NO dev server / Metro server** — removed `expo start` scripts from package.json. Build is static-only (`expo export`). Do NOT add dev server scripts back.
+- Valid npm scripts: `build:web`, `electron`, `electron-dev`, `dist`, `typecheck`
 - Reset: `.\arc_view.bat --reset` or `window.arcDesktop.resetApp()` from app
 - `eng.traineddata` is untracked Tesseract OCR data (don't commit)

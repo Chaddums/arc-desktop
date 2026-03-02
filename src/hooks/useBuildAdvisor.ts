@@ -2,13 +2,17 @@
  * useBuildAdvisor — Build recommendation engine.
  * Scores items by relevance to playstyle goal using stat weights, rarity,
  * item type affinity, and name keyword matching.
+ * Scores skills using attribute-based semantic mapping (not keyword matching).
+ * Detects dead/wasted perks by cross-referencing allocated skills with equipped gear.
  */
 
 import { useMemo } from "react";
 import { loc } from "../utils/loc";
 import { matchesSlot } from "../utils/itemTypes";
+import { SKILL_NODE_ATTRIBUTES, getNodeAttributes, getBranchLabel } from "../data/skillNodeAttributes";
+import type { SkillTag } from "../data/skillNodeAttributes";
 import type { MetaForgeItem, SkillNode } from "../types";
-import type { EquipmentSlot } from "./useMyLoadout";
+import type { EquipmentSlot, BuildClass } from "./useMyLoadout";
 
 export type PlaystyleGoal = "Aggressive" | "Balanced" | "Survival" | "Farming";
 
@@ -25,14 +29,48 @@ export interface SkillRecommendation {
   nodeName: string;
   points: number;
   reasoning: string;
+  branch: string;
+  score: number;
+}
+
+export interface DeadPerkWarning {
+  nodeId: string;
+  nodeName: string;
+  allocatedPoints: number;
+  severity: "wasted" | "suboptimal";
+  reason: string;
 }
 
 export interface BuildAdvice {
   goal: PlaystyleGoal;
   itemRecommendations: Map<string, BuildRecommendation[]>;
   skillRecommendations: SkillRecommendation[];
+  deadPerks: DeadPerkWarning[];
   summary: string;
 }
+
+// ─── Skill archetype weights per playstyle/build class ──────────
+
+interface ArchetypeWeights {
+  dps: number;
+  tank: number;
+  support: number;
+  stealth: number;
+}
+
+const PLAYSTYLE_WEIGHTS: Record<PlaystyleGoal, ArchetypeWeights> = {
+  Aggressive: { dps: 3, tank: 0.5, support: 0.5, stealth: 0 },
+  Survival:   { dps: 0.5, tank: 3, support: 0.5, stealth: 0 },
+  Balanced:   { dps: 1, tank: 1, support: 1, stealth: 0.5 },
+  Farming:    { dps: 0, tank: 0.5, support: 1, stealth: 3 },
+};
+
+const BUILD_CLASS_WEIGHTS: Record<BuildClass, ArchetypeWeights> = {
+  DPS:     { dps: 3, tank: 0.5, support: 0.5, stealth: 0 },
+  Tank:    { dps: 0.5, tank: 3, support: 0.5, stealth: 0 },
+  Support: { dps: 0.5, tank: 0.5, support: 3, stealth: 1 },
+  Hybrid:  { dps: 1, tank: 1, support: 1, stealth: 0.5 },
+};
 
 // ─── Stat-based scoring weights per playstyle ──────────────────
 const STAT_WEIGHTS: Record<PlaystyleGoal, Record<string, number>> = {
@@ -187,13 +225,181 @@ function generateReasoning(item: MetaForgeItem, goal: PlaystyleGoal): string {
   }
 
   if (parts.length === 0) return "General utility item";
-  return parts.join(" · ");
+  return parts.join(" \u00B7 ");
 }
+
+// ─── Attribute-based skill scoring ─────────────────────────────
+
+function scoreSkillNode(
+  node: SkillNode,
+  weights: ArchetypeWeights,
+  allocations: Record<string, number>,
+  allNodes: SkillNode[],
+): { score: number; reasoning: string } {
+  const attrs = getNodeAttributes(node.id);
+  if (!attrs) return { score: 0, reasoning: "Unknown skill" };
+
+  // Base score from archetype weights
+  let score = (attrs.dps * weights.dps)
+    + (attrs.tank * weights.tank)
+    + (attrs.support * weights.support)
+    + (attrs.stealth * weights.stealth);
+
+  const parts: string[] = [];
+
+  // Major node bonus (×1.3)
+  if (node.isMajor) {
+    score *= 1.3;
+    parts.push("Major node");
+  }
+
+  // "Finish what you started" bonus — partially allocated nodes get ×1.1
+  const current = allocations[node.id] ?? 0;
+  const max = node.maxPoints ?? 1;
+  if (current > 0 && current < max) {
+    score *= 1.1;
+    parts.push(`${current}/${max} allocated`);
+  }
+
+  // Prerequisite penalty — if prereqs not met, ×0.3
+  if (node.prerequisiteNodeIds && node.prerequisiteNodeIds.length > 0) {
+    const prereqsMet = node.prerequisiteNodeIds.every((pid) => {
+      const prereqNode = allNodes.find((n) => n.id === pid);
+      const prereqMax = prereqNode?.maxPoints ?? 1;
+      return (allocations[pid] ?? 0) >= prereqMax;
+    });
+    if (!prereqsMet) {
+      score *= 0.3;
+      parts.push("Prereqs not met");
+    }
+  }
+
+  // Build the reasoning from the attribute note
+  parts.unshift(attrs.buildNote);
+
+  return { score: Math.round(score * 10) / 10, reasoning: parts.join(" \u00B7 ") };
+}
+
+// ─── Dead perk detection ────────────────────────────────────────
+
+interface LoadoutContext {
+  hasShield: boolean;
+  hasMelee: boolean;
+  hasRangedOnly: boolean;
+  buildClass: BuildClass;
+  isSolo: boolean;
+  survivability: number;
+}
+
+function detectDeadPerks(
+  skillNodes: SkillNode[],
+  allocations: Record<string, number>,
+  context: LoadoutContext,
+): DeadPerkWarning[] {
+  const warnings: DeadPerkWarning[] = [];
+
+  for (const node of skillNodes) {
+    const current = allocations[node.id] ?? 0;
+    if (current === 0) continue; // only check allocated nodes
+
+    const attrs = getNodeAttributes(node.id);
+    if (!attrs) continue;
+
+    const nodeName = loc(node.name) || node.id;
+
+    for (const tag of attrs.tags) {
+      const warning = checkTag(tag, nodeName, node.id, current, context);
+      if (warning) {
+        warnings.push(warning);
+        break; // one warning per node
+      }
+    }
+  }
+
+  return warnings;
+}
+
+function checkTag(
+  tag: SkillTag,
+  nodeName: string,
+  nodeId: string,
+  allocatedPoints: number,
+  ctx: LoadoutContext,
+): DeadPerkWarning | null {
+  switch (tag) {
+    case "shield_synergy":
+      if (!ctx.hasShield) {
+        return {
+          nodeId, nodeName, allocatedPoints,
+          severity: "wasted",
+          reason: "No shield equipped \u2014 bonus inactive",
+        };
+      }
+      break;
+
+    case "stealth":
+      if (ctx.buildClass === "DPS" || ctx.buildClass === "Tank") {
+        return {
+          nodeId, nodeName, allocatedPoints,
+          severity: "suboptimal",
+          reason: "Stealth perks conflict with heavy loadout",
+        };
+      }
+      break;
+
+    case "melee":
+      if (!ctx.hasMelee && ctx.hasRangedOnly) {
+        return {
+          nodeId, nodeName, allocatedPoints,
+          severity: "suboptimal",
+          reason: "Melee perks unused with ranged weapons",
+        };
+      }
+      break;
+
+    case "looting":
+      if (ctx.buildClass === "DPS") {
+        return {
+          nodeId, nodeName, allocatedPoints,
+          severity: "suboptimal",
+          reason: "Low-value for combat-first builds",
+        };
+      }
+      break;
+
+    case "team_support":
+      if (ctx.isSolo) {
+        return {
+          nodeId, nodeName, allocatedPoints,
+          severity: "suboptimal",
+          reason: "Team perks have no value solo",
+        };
+      }
+      break;
+
+    case "downed":
+      if (ctx.survivability < 30) {
+        return {
+          nodeId, nodeName, allocatedPoints,
+          severity: "suboptimal",
+          reason: "Consider defensive perks instead",
+        };
+      }
+      break;
+  }
+  return null;
+}
+
+// ─── Hook ───────────────────────────────────────────────────────
 
 export function useBuildAdvisor(
   items: MetaForgeItem[],
   skillNodes: SkillNode[],
   skillAllocations: Record<string, number>,
+  buildClass?: BuildClass,
+  loadout?: Partial<Record<EquipmentSlot, MetaForgeItem | null>>,
+  survivability?: number,
+  isSolo?: boolean,
 ) {
   const getAdvice = useMemo(() => {
     return (goal: PlaystyleGoal): BuildAdvice => {
@@ -232,32 +438,42 @@ export function useBuildAdvisor(
         }
       }
 
-      // Skill recommendations
-      const goalKeywords: Record<PlaystyleGoal, string[]> = {
-        Aggressive: ["damage", "fire", "attack", "critical", "weapon", "combat", "assault"],
-        Balanced: ["health", "damage", "shield", "stamina", "versatil", "adapt"],
-        Survival: ["health", "shield", "armor", "heal", "defense", "resist", "repair", "protect"],
-        Farming: ["speed", "stealth", "agility", "carry", "loot", "inventory", "extract", "scan"],
-      };
-      const keywords = goalKeywords[goal];
+      // Skill recommendations — attribute-based scoring
+      const weights = PLAYSTYLE_WEIGHTS[goal];
       const skillRecs: SkillRecommendation[] = [];
 
       for (const node of skillNodes) {
-        const name = loc(node.name).toLowerCase();
-        const matches = keywords.some((kw) => name.includes(kw));
-        if (matches) {
-          const current = skillAllocations[node.id] ?? 0;
-          const max = node.maxPoints ?? 1;
-          if (current < max) {
-            skillRecs.push({
-              nodeId: node.id,
-              nodeName: loc(node.name) || node.id,
-              points: max,
-              reasoning: `Supports ${goal.toLowerCase()} playstyle`,
-            });
-          }
-        }
+        const current = skillAllocations[node.id] ?? 0;
+        const max = node.maxPoints ?? 1;
+        if (current >= max) continue; // already maxed
+
+        const { score, reasoning } = scoreSkillNode(node, weights, skillAllocations, skillNodes);
+        if (score <= 0) continue;
+
+        skillRecs.push({
+          nodeId: node.id,
+          nodeName: loc(node.name) || node.id,
+          points: max,
+          reasoning,
+          branch: getBranchLabel(node.id),
+          score,
+        });
       }
+
+      // Sort by score descending, take top 8
+      skillRecs.sort((a, b) => b.score - a.score);
+
+      // Dead perk detection
+      const effectiveBuildClass = buildClass ?? "Hybrid";
+      const context: LoadoutContext = {
+        hasShield: loadout?.shield != null,
+        hasMelee: false, // TODO: detect from weapon type when melee data available
+        hasRangedOnly: loadout?.weapon != null,
+        buildClass: effectiveBuildClass,
+        isSolo: isSolo ?? true,
+        survivability: survivability ?? 50,
+      };
+      const deadPerks = detectDeadPerks(skillNodes, skillAllocations, context);
 
       const summaries: Record<PlaystyleGoal, string> = {
         Aggressive:
@@ -273,11 +489,50 @@ export function useBuildAdvisor(
       return {
         goal,
         itemRecommendations: itemsByCategory,
-        skillRecommendations: skillRecs.slice(0, 5),
+        skillRecommendations: skillRecs.slice(0, 8),
+        deadPerks,
         summary: summaries[goal],
       };
     };
-  }, [items, skillNodes, skillAllocations]);
+  }, [items, skillNodes, skillAllocations, buildClass, loadout, survivability, isSolo]);
 
-  return { getAdvice };
+  /** Get skill recommendations using auto-detected build class instead of manual playstyle */
+  const getAutoAdvice = useMemo(() => {
+    if (!buildClass) return null;
+    const weights = BUILD_CLASS_WEIGHTS[buildClass];
+
+    const skillRecs: SkillRecommendation[] = [];
+    for (const node of skillNodes) {
+      const current = skillAllocations[node.id] ?? 0;
+      const max = node.maxPoints ?? 1;
+      if (current >= max) continue;
+
+      const { score, reasoning } = scoreSkillNode(node, weights, skillAllocations, skillNodes);
+      if (score <= 0) continue;
+
+      skillRecs.push({
+        nodeId: node.id,
+        nodeName: loc(node.name) || node.id,
+        points: max,
+        reasoning,
+        branch: getBranchLabel(node.id),
+        score,
+      });
+    }
+    skillRecs.sort((a, b) => b.score - a.score);
+
+    const context: LoadoutContext = {
+      hasShield: loadout?.shield != null,
+      hasMelee: false,
+      hasRangedOnly: loadout?.weapon != null,
+      buildClass,
+      isSolo: isSolo ?? true,
+      survivability: survivability ?? 50,
+    };
+    const deadPerks = detectDeadPerks(skillNodes, skillAllocations, context);
+
+    return { skillRecommendations: skillRecs.slice(0, 8), deadPerks, buildClass };
+  }, [skillNodes, skillAllocations, buildClass, loadout, survivability, isSolo]);
+
+  return { getAdvice, getAutoAdvice };
 }

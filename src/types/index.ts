@@ -96,6 +96,9 @@ export interface SkillNode {
   maxPoints?: number;
   position?: { x: number; y: number };
   prerequisiteNodeIds?: string[];
+  description?: LocalizedString;
+  impactedSkill?: LocalizedString;
+  iconName?: string;
 }
 
 export interface StationRequirement {

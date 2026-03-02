@@ -159,7 +159,10 @@ export default function LoadoutScreen() {
   } = useLoadout();
 
   // ─── Build advisor hook ──────────────────────────────────────
-  const { getAdvice } = useBuildAdvisor(items, skillNodes, skillAllocations);
+  const { getAdvice } = useBuildAdvisor(
+    items, skillNodes, skillAllocations,
+    myBuildClass as any, myLoadout as any, myLoadoutStats?.survivability,
+  );
 
   // ─── Local state for equipment slot filter (item browser) ─────
   const [activeSlot, setActiveSlot] = useState<string | null>(null);
@@ -1127,11 +1130,18 @@ export default function LoadoutScreen() {
                 <Panel key={rec.nodeId} style={styles.adviceItemCard}>
                   <View style={styles.adviceSkillRow}>
                     <View style={styles.adviceItemTextCol}>
-                      <Text style={styles.adviceItemName}>{rec.nodeName}</Text>
+                      <Text style={styles.adviceItemName}>
+                        {rec.nodeName}
+                        {rec.branch ? (
+                          <Text style={{ color: C.textSecondary, fontSize: 10 }}> {rec.branch}</Text>
+                        ) : null}
+                      </Text>
                       <Text style={styles.adviceItemReasoning}>{rec.reasoning}</Text>
                     </View>
-                    <Text style={styles.adviceSkillPoints}>
-                      {rec.points} pts
+                    <Text style={[styles.adviceSkillPoints, {
+                      color: rec.score >= 20 ? C.green : rec.score >= 10 ? C.amber : C.textSecondary,
+                    }]}>
+                      +{Math.round(rec.score)}pt
                     </Text>
                   </View>
                 </Panel>
@@ -1139,8 +1149,46 @@ export default function LoadoutScreen() {
             </>
           )}
 
+          {buildAdvice.deadPerks && buildAdvice.deadPerks.length > 0 && (
+            <>
+              <Text style={styles.adviceSlotTitle}>Wasted Perks</Text>
+              {buildAdvice.deadPerks.map((perk) => (
+                <Panel key={perk.nodeId} style={{
+                  ...styles.adviceItemCard,
+                  borderColor: perk.severity === "wasted" ? C.red + "60" : C.amber + "40",
+                }}>
+                  <View style={styles.adviceSkillRow}>
+                    <View style={styles.adviceItemTextCol}>
+                      <Text style={styles.adviceItemName}>
+                        {perk.nodeName}
+                        <Text style={{ color: C.textSecondary, fontSize: 10 }}> ({perk.allocatedPoints}pt)</Text>
+                      </Text>
+                      <Text style={[styles.adviceItemReasoning, {
+                        color: perk.severity === "wasted" ? C.red : C.amber,
+                      }]}>
+                        {perk.reason}
+                      </Text>
+                    </View>
+                    <View style={[styles.severityBadge, {
+                      backgroundColor: perk.severity === "wasted" ? C.red + "20" : C.amber + "20",
+                    }]}>
+                      <Text style={{
+                        fontSize: 8,
+                        fontWeight: "700",
+                        color: perk.severity === "wasted" ? C.red : C.amber,
+                        letterSpacing: 0.5,
+                      }}>
+                        {perk.severity === "wasted" ? "WASTED" : "SUBOPT"}
+                      </Text>
+                    </View>
+                  </View>
+                </Panel>
+              ))}
+            </>
+          )}
+
           <Text style={{ color: C.textSecondary, fontSize: 10, textAlign: "center", marginTop: 12, opacity: 0.6 }}>
-            (Beta) Estimates based on available data
+            Skill scores based on perk analysis, not keyword matching
           </Text>
         </>
       )}
@@ -1515,6 +1563,7 @@ const styles = StyleSheet.create({
   adviceItemScore: { fontSize: fs.lg, fontWeight: "700", fontVariant: ["tabular-nums"], minWidth: 36, textAlign: "right" },
   adviceSkillRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   adviceSkillPoints: { fontSize: fs.md, fontWeight: "700", color: Colors.accent, minWidth: 40, textAlign: "right" },
+  severityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 3 },
 
   // ─── Stash Organizer ────────────────────────────────────────
   stashExpandedPanel: {

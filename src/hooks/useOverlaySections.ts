@@ -12,6 +12,15 @@ export interface OverlaySections {
   activeQuests: boolean;
   squadLoadout: boolean;
   mapBriefing: boolean;
+  questTracker: boolean;
+  buildAdvice: boolean;
+  dailyQuests: boolean;
+  inventoryContext: boolean;
+  traderContext: boolean;
+  mapSelectorContext: boolean;
+  workshopContext: boolean;
+  mapInspectorContext: boolean;
+  skillTreeContext: boolean;
 }
 
 const DEFAULTS: OverlaySections = {
@@ -19,6 +28,15 @@ const DEFAULTS: OverlaySections = {
   activeQuests: true,
   squadLoadout: true,
   mapBriefing: false,
+  questTracker: false,
+  buildAdvice: false,
+  dailyQuests: false,
+  inventoryContext: true,
+  traderContext: true,
+  mapSelectorContext: true,
+  workshopContext: true,
+  mapInspectorContext: true,
+  skillTreeContext: true,
 };
 
 export function useOverlaySections() {
