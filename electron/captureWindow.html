@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Capture</title></head>
+<body>
+<video id="v" autoplay muted style="position:fixed;top:0;left:0;width:1px;height:1px;opacity:0"></video>
+<canvas id="c" style="display:none"></canvas>
+<script>
+(() => {
+  const video = document.getElementById("v");
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  let stream = null;
+  let timer = null;
+  let zones = [];
+  let intervalMs = 1500;
+  let grabbing = false;
+
+  // ── Setup: request display media and attach to video ──────
+  window.captureIPC.onSetup(async (data) => {
+    zones = data.zones || [];
+    intervalMs = data.intervalMs || 1500;
+
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+
+      video.srcObject = stream;
+      await video.play();
+
+      // Wait one frame for videoWidth/videoHeight to populate
+      await new Promise((r) => requestAnimationFrame(r));
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      window.captureIPC.sendStatus({
+        type: "ready",
+        width: video.videoWidth,
+        height: video.videoHeight,
+      });
+
+      // Monitor stream end (game closed, source removed)
+      stream.getVideoTracks()[0].addEventListener("ended", () => {
+        stopTimer();
+        stream = null;
+        video.srcObject = null;
+        window.captureIPC.sendStatus({ type: "ended" });
+      });
+    } catch (err) {
+      window.captureIPC.sendStatus({ type: "error", message: err.message });
+    }
+  });
+
+  // ── Start / Stop timer ────────────────────────────────────
+  window.captureIPC.onStart(() => {
+    if (timer || !stream) return;
+    grabFrame();
+    timer = setInterval(grabFrame, intervalMs);
+  });
+
+  window.captureIPC.onStop(() => stopTimer());
+
+  function stopTimer() {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  // ── Settings update ───────────────────────────────────────
+  window.captureIPC.onUpdateSettings((data) => {
+    if (data.zones) zones = data.zones;
+    if (data.intervalMs) {
+      intervalMs = data.intervalMs;
+      if (timer) {
+        clearInterval(timer);
+        timer = setInterval(grabFrame, intervalMs);
+      }
+    }
+  });
+
+  // ── Test capture (one-shot, returns zone dimensions) ──────
+  window.captureIPC.onTestCapture(() => {
+    if (!stream || !video.videoWidth) {
+      window.captureIPC.sendTestResult(null);
+      return;
+    }
+
+    ctx.drawImage(video, 0, 0);
+    const results = [];
+    for (const zone of zones) {
+      const dims = getZoneDims(zone);
+      if (dims) results.push({ zone: zone.id, width: dims.w, height: dims.h });
+    }
+
+    window.captureIPC.sendTestResult({
+      screenWidth: video.videoWidth,
+      screenHeight: video.videoHeight,
+      zones: results,
+    });
+  });
+
+  // ── Frame grab + zone crop ────────────────────────────────
+  async function grabFrame() {
+    if (grabbing || !stream || !video.videoWidth) return;
+    grabbing = true;
+    try {
+      ctx.drawImage(video, 0, 0);
+      const timestamp = Date.now();
+
+      const promises = zones.map(async (zone) => {
+        const dims = getZoneDims(zone);
+        if (!dims) return;
+
+        const tmp = document.createElement("canvas");
+        tmp.width = dims.w;
+        tmp.height = dims.h;
+        tmp.getContext("2d").drawImage(
+          canvas,
+          dims.x, dims.y, dims.w, dims.h,
+          0, 0, dims.w, dims.h
+        );
+
+        const blob = await new Promise((r) => tmp.toBlob(r, "image/png"));
+        const buffer = new Uint8Array(await blob.arrayBuffer());
+
+        window.captureIPC.sendZoneBuffer({
+          buffer,
+          zone: zone.id,
+          timestamp,
+        });
+      });
+
+      await Promise.all(promises);
+    } catch {
+      // Silent — frame grab can fail if stream is ending
+    } finally {
+      grabbing = false;
+    }
+  }
+
+  function getZoneDims(zone) {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const x = Math.round(zone.x * vw);
+    const y = Math.round(zone.y * vh);
+    const w = Math.round(zone.width * vw);
+    const h = Math.round(zone.height * vh);
+
+    if (x + w > vw || y + h > vh) return null;
+    if (w < 10 || h < 10) return null;
+    return { x, y, w, h };
+  }
+})();
+</script>
+</body>
+</html>

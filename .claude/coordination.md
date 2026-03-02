@@ -2,7 +2,7 @@
 
 ## Session A (this session)
 - Status: active
-- Working on: awaiting task assignment
+- Working on: persistent MediaStream capture (replacing desktopCapturer polling to fix stutter)
 - Last check-in: 2026-03-01
 
 ## Session B
@@ -21,6 +21,9 @@
 - src/components/OverlayChecklist.tsx (Session A)
 - src/components/OverlayHUD.tsx (Session A)
 - electron/main.js (Session A)
+- electron/screenCapture.js (Session A — rewriting)
+- electron/capturePreload.js (Session A — new)
+- electron/captureWindow.html (Session A — new)
 
 ## Notes
-<!-- Anything one session needs the other to know -->
+- Session A is replacing desktopCapturer.getSources() polling with persistent MediaStream to fix mouse stutter/DXGI crashes
