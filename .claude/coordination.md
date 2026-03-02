@@ -1,14 +1,14 @@
 # Session Coordination
 
 ## Session A (this session)
-- Status: idle
-- Working on: —
-- Last check-in: 2026-03-01 (completed compact UI)
+- Status: active
+- Working on: awaiting task assignment
+- Last check-in: 2026-03-01
 
 ## Session B
-- Status: idle
-- Working on: —
-- Last check-in: —
+- Status: active
+- Working on: mouse stutter & game crash investigation (bugs)
+- Last check-in: 2026-03-01
 
 ## Claimed Files
 - src/types/index.ts (Session A)

@@ -44,6 +44,7 @@
 - [x] Window geometry persistence (save/restore position and size)
 - [x] Window size presets (Default / Large / XL) in Settings
 - [x] TitleBar component with ARC/VIEW branding
+- [x] Configurable overlay panels — toggle which info strips are visible (OverlayBuilder + useOverlayConfig)
 
 ### P3 — Theming & Accessibility ✓
 - [x] Dual theme system (Clean sci-fi + Tactical gritty variant)
@@ -72,7 +73,6 @@
 ### P2 — Still Open
 - [ ] Sheen sweep animation for premium visual polish
 - [ ] Auto-hide timer (3s default, 30s while loading)
-- [ ] Configurable overlay panels — toggle which info strips are visible
 - [ ] Multi-monitor support — clamp overlay position to active monitor
 - [ ] Edge-based resize handle
 - [ ] Refine OCR capture zones after in-game testing
