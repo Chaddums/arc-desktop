@@ -5,16 +5,14 @@
  * appearance, position, and HUD color customization.
  */
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
   Switch,
   TextInput,
-  useWindowDimensions,
 } from "react-native";
 import { Colors, fonts, spacing, fontSize, textPresets } from "../theme";
 import { useColors } from "../theme/ThemeContext";
@@ -101,7 +99,14 @@ if (typeof document !== "undefined") {
 
 export default function OverlayBuilderScreen() {
   const C = useColors();
-  const { width } = useWindowDimensions();
+  // Direct DOM resize listener (useWindowDimensions doesn't fire in Electron)
+  const [width, setWidth] = useState(() => typeof window !== "undefined" ? window.innerWidth : 900);
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   const {
     config,
     updateSection,
@@ -120,8 +125,18 @@ export default function OverlayBuilderScreen() {
 
   const isWide = width >= 860;
 
-  // Sorted section configs for display
-  const sortedConfigs = [...config.sectionConfigs].sort((a, b) => a.order - b.order);
+  // Compute explicit preview pixel dimensions from window width.
+  // Sidebar=56+1px border, padding=10*2, gap=12 between preview & controls.
+  const ar = config.gameResolution.width / config.gameResolution.height;
+  const availableWidth = width - 57 - spacing.lg * 2;
+  const previewWidth = isWide ? Math.floor((availableWidth - 12) * 3 / 5) : availableWidth;
+  const previewHeight = Math.floor(previewWidth / ar);
+
+  // Sorted section configs for display (hide always-on sections from toggle list)
+  const HIDDEN_SECTIONS = new Set(["skillTreeContext"]);
+  const sortedConfigs = [...config.sectionConfigs]
+    .filter((c) => !HIDDEN_SECTIONS.has(c.id))
+    .sort((a, b) => a.order - b.order);
   const orderedIds = sortedConfigs.map((c) => c.id);
 
   // ─── Reorder handlers ────────────────────────────────────────
@@ -210,10 +225,12 @@ export default function OverlayBuilderScreen() {
   };
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: C.bg }]}
-      contentContainerStyle={styles.content}
-    >
+    <div style={{
+      flex: 1,
+      backgroundColor: C.bg,
+      overflowY: "auto",
+      paddingBottom: 24,
+    }}>
       {/* Header */}
       <Text style={[textPresets.screenHeader, { color: C.text }]}>
         Overlay Builder
@@ -251,20 +268,28 @@ export default function OverlayBuilderScreen() {
         ))}
       </View>
 
-      {/* Main layout: preview + controls */}
-      <View style={[styles.mainLayout, !isWide && styles.mainLayoutStacked]}>
-        {/* Preview Pane */}
-        <View
-          style={[
-            styles.previewPane,
-            {
-              backgroundColor: C.bgDeep,
-              borderColor: C.border,
-              aspectRatio: config.gameResolution.width / config.gameResolution.height,
-            },
-            !isWide && styles.previewPaneStacked,
-          ]}
-        >
+      {/* Main layout: preview + controls (raw divs so CSS flex + aspect-ratio reflow on resize) */}
+      <div style={{
+        display: "flex",
+        flexDirection: isWide ? "row" : "column",
+        paddingLeft: spacing.lg,
+        paddingRight: spacing.lg,
+        gap: 12,
+      }}>
+        {/* Preview Pane — explicit pixel dims, flex column so SceneBackground fills it */}
+        <div style={{
+          width: previewWidth,
+          height: previewHeight,
+          display: "flex",
+          flexDirection: "column" as const,
+          border: `1px solid ${C.border}`,
+          borderRadius: 6,
+          overflow: "hidden",
+          position: "relative" as const,
+          backgroundColor: C.bgDeep,
+          flexShrink: 0,
+          marginBottom: isWide ? 0 : 12,
+        }}>
           {/* Screenshot placeholder + overlay preview */}
           <SceneBackground scene={activeScene}>
             <OverlayPreview
@@ -278,7 +303,7 @@ export default function OverlayBuilderScreen() {
               onSectionWidthChange={updateSectionWidth}
             />
           </SceneBackground>
-        </View>
+        </div>
 
         {/* Control Panel */}
         <View style={[styles.controlPanel, !isWide && styles.controlPanelStacked]}>
@@ -601,8 +626,8 @@ export default function OverlayBuilderScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
-    </ScrollView>
+      </div>
+    </div>
   );
 }
 
@@ -694,12 +719,7 @@ function SceneBackground({ scene, children }: { scene: string; children: React.R
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    paddingBottom: 24,
-  },
+  // (container + content are now a raw scrollable <div>)
   subtitle: {
     fontSize: fontSize.sm,
     paddingHorizontal: spacing.lg,
@@ -750,26 +770,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     textTransform: "uppercase",
   },
-  // ─── Main Layout ──────────────────────────────────────────
-  mainLayout: {
-    flexDirection: "row",
-    paddingHorizontal: spacing.lg,
-    gap: 12,
-  },
-  mainLayoutStacked: {
-    flexDirection: "column",
-  },
-  // ─── Preview Pane ─────────────────────────────────────────
-  previewPane: {
-    flex: 3,
-    borderWidth: 1,
-    borderRadius: 6,
-    overflow: "hidden",
-    position: "relative",
-  },
-  previewPaneStacked: {
-    marginBottom: 12,
-  },
+  // (mainLayout + previewPane are raw <div>s with inline CSS for reliable reflow)
   // ─── Control Panel ────────────────────────────────────────
   controlPanel: {
     flex: 2,

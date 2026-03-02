@@ -48,7 +48,7 @@ let mainWindow = null;
 let overlayWindow = null;
 let tray = null;
 let currentMode = "main"; // "main" | "overlay"
-let serverUrl = "app://dist/index.html";
+let serverUrl = `app://dist/index.html?v=${Date.now()}`;
 let gameDetector = null;
 let screenCapture = null;
 
@@ -186,41 +186,54 @@ async function positionOverlayOnGame() {
     // User already has a saved position — don't overwrite it
     return;
   }
+  const gameBounds = await detectGameBounds();
+  if (gameBounds) {
+    const initHeight = 200;
+    saveOverlaySettings({
+      x: gameBounds.x + gameBounds.width - OVERLAY_WIDTH - OVERLAY_MARGIN,
+      y: gameBounds.y + gameBounds.height - initHeight - OVERLAY_MARGIN,
+    });
+  }
+  // Fallback: saved position or cursor-based default will be used
+}
+
+/**
+ * Detect game window bounds. Tries PioneerGame first, then ArcRaiders.
+ * Returns { x, y, width, height } or null.
+ */
+async function detectGameBounds() {
   try {
     const { getWindowBounds } = require("./windowFinder");
-    const gameBounds = await getWindowBounds("PioneerGame");
-    if (gameBounds) {
-      const initHeight = 200;
-      saveOverlaySettings({
-        x: gameBounds.x + gameBounds.width - OVERLAY_WIDTH - OVERLAY_MARGIN,
-        y: gameBounds.y + gameBounds.height - initHeight - OVERLAY_MARGIN,
-      });
-      return;
+    for (const name of ["PioneerGame", "ArcRaiders"]) {
+      const b = await getWindowBounds(name);
+      if (b && b.width > 100 && b.height > 100) {
+        console.log(`[overlay] Game window found via "${name}": ${b.x},${b.y} ${b.width}x${b.height}`);
+        return b;
+      }
     }
-  } catch {}
-  // Fallback: saved position or cursor-based default will be used
+    console.log("[overlay] Game window not found, using display bounds");
+  } catch (err) {
+    console.log("[overlay] Game detection error:", err.message);
+  }
+  return null;
+}
+
+/**
+ * Get bounds for overlay window: game window if running, else current display.
+ */
+async function getOverlayBounds() {
+  const gameBounds = await detectGameBounds();
+  if (gameBounds) return gameBounds;
+  const cursorPoint = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursorPoint);
+  return display.bounds;
 }
 
 async function createOverlayWindow(url) {
   const saved = loadOverlaySettings();
   overlayLocked = !!(saved && saved.locked);
 
-  // Size overlay to game window so normalized positions from the builder map 1:1.
-  // Falls back to full display if game isn't running.
-  let bounds;
-  try {
-    const { getWindowBounds } = require("./windowFinder");
-    const gameBounds = await getWindowBounds("PioneerGame");
-    if (gameBounds && gameBounds.width > 100 && gameBounds.height > 100) {
-      bounds = gameBounds;
-    }
-  } catch {}
-
-  if (!bounds) {
-    const cursorPoint = screen.getCursorScreenPoint();
-    const display = screen.getDisplayNearestPoint(cursorPoint);
-    bounds = display.bounds;
-  }
+  const bounds = await getOverlayBounds();
 
   overlayWindow = new BrowserWindow({
     width: bounds.width,
@@ -266,13 +279,16 @@ async function createOverlayWindow(url) {
 async function toggleMode() {
   if (currentMode === "main") {
     currentMode = "overlay";
-    // Hide main first, ensure it's gone before overlay appears
+    // Minimize main window (keeps taskbar icon so user knows app is active)
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.hide();
+      mainWindow.minimize();
     }
     if (!overlayWindow || overlayWindow.isDestroyed()) {
       await createOverlayWindow(serverUrl);
     } else {
+      // Re-check game bounds and reposition before showing
+      const bounds = await getOverlayBounds();
+      overlayWindow.setBounds(bounds);
       overlayWindow.show();
     }
   } else {
@@ -588,15 +604,22 @@ if (!gotLock) {
 // ─── App Lifecycle ──────────────────────────────────────────────
 app.whenReady().then(() => {
   // protocol.handle is the modern API (Electron 25+)
-  protocol.handle("app", (request) => {
+  // Wrap responses with no-cache headers to prevent Chromium from serving stale bundles
+  protocol.handle("app", async (request) => {
     const { pathname } = new URL(request.url);
     const filePath = path.join(DIST, decodeURIComponent(pathname));
 
-    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-      return net.fetch(pathToFileURL(filePath).href);
-    }
-    // SPA fallback
-    return net.fetch(pathToFileURL(path.join(DIST, "index.html")).href);
+    const target = (fs.existsSync(filePath) && fs.statSync(filePath).isFile())
+      ? filePath
+      : path.join(DIST, "index.html"); // SPA fallback
+    const response = await net.fetch(pathToFileURL(target).href);
+    return new Response(response.body, {
+      status: response.status,
+      headers: {
+        ...Object.fromEntries(response.headers.entries()),
+        "Cache-Control": "no-store",
+      },
+    });
   });
 
   createMainWindow(serverUrl);
