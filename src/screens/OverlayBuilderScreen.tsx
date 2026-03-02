@@ -42,7 +42,7 @@ const SCENES = [
   { id: "map", label: "Map View" },
 ];
 
-const SECTION_LABELS: Record<SectionId, { label: string; desc: string }> = {
+const SECTION_LABELS: Partial<Record<SectionId, { label: string; desc: string }>> = {
   eventFeed: { label: "Event Feed", desc: "Active & upcoming game events with countdowns" },
   activeQuests: { label: "Active Quests", desc: "Tracked quest progress from all traders" },
   squadLoadout: { label: "Squad Loadout", desc: "Teammate weapons, gear & online status" },
@@ -55,7 +55,6 @@ const SECTION_LABELS: Record<SectionId, { label: string; desc: string }> = {
   mapSelectorContext: { label: "Map Select Intel", desc: "Quest alignment & events (shows in map select)" },
   workshopContext: { label: "Workshop Guide", desc: "Workbench listing & crafts (shows in workshop)" },
   mapInspectorContext: { label: "Map Objectives", desc: "Filtered quest objectives (shows on map view)" },
-  skillTreeContext: { label: "Skill Tree Advisor", desc: "Build-aware skill recommendations (shows in skill tree)" },
 };
 
 const OPACITY_STEPS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
@@ -314,6 +313,7 @@ export default function OverlayBuilderScreen() {
             </Text>
             {sortedConfigs.map((cfg, idx) => {
               const info = SECTION_LABELS[cfg.id];
+              if (!info) return null; // Skip always-on sections (e.g. skillTreeContext)
               const isFirst = idx === 0;
               const isLast = idx === sortedConfigs.length - 1;
               const isDragOver = dragOverId === cfg.id;

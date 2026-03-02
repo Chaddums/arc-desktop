@@ -471,8 +471,6 @@ export default function OverlayHUD() {
           />
         );
       case "skillTreeContext":
-        // Only show when skill tree menu is detected via OCR
-        if (menuState !== "skill_tree") return null;
         return getAutoAdvice ? (
           <OverlaySkillTreeContext
             key={id}
