@@ -4,11 +4,6 @@
   "description": "Arc Raiders companion — events, quests, crafting",
   "main": "index.ts",
   "scripts": {
-    "start": "expo start",
-    "restart": "expo start --clear",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "build:web": "npx expo export --platform web",
     "electron": "npm run build:web && electron electron/main.js",
