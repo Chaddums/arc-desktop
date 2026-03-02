@@ -14,6 +14,7 @@ import {
   StyleSheet,
   Switch,
   TextInput,
+  Image,
   useWindowDimensions,
 } from "react-native";
 import { Colors, fonts, spacing, fontSize, textPresets } from "../theme";
@@ -29,7 +30,13 @@ import type {
 import OverlayPreview from "../components/OverlayPreview";
 import OverlayCornerPicker from "../components/OverlayCornerPicker";
 
-// ─── Scene backgrounds (placeholder gradient until user provides screenshots) ─
+// ─── Scene backgrounds ──────────────────────────────────────────
+const SCENE_IMAGES: Record<string, ReturnType<typeof require>> = {
+  gameplay: require("../../assets/screenshots/gameplay.png"),
+  inventory: require("../../assets/screenshots/inventory.png"),
+  map: require("../../assets/screenshots/map.png"),
+};
+
 const SCENES = [
   { id: "gameplay", label: "Gameplay" },
   { id: "inventory", label: "Inventory" },
@@ -606,61 +613,25 @@ const colorStyles = StyleSheet.create({
   },
 });
 
-/** Dark gradient placeholder for game screenshots */
+/** Game screenshot background for overlay preview */
 function ScenePlaceholder({ scene }: { scene: string }) {
-  const labels: Record<string, string> = {
-    gameplay: "GAMEPLAY VIEW",
-    inventory: "INVENTORY SCREEN",
-    map: "MAP VIEW",
-  };
+  const source = SCENE_IMAGES[scene];
+  if (!source) return null;
 
   return (
-    <View style={placeholderStyles.container}>
-      <View style={placeholderStyles.gridOverlay}>
-        {/* Scanline effect */}
-        {Array.from({ length: 8 }).map((_, i) => (
-          <View
-            key={i}
-            style={[
-              placeholderStyles.scanline,
-              { top: `${(i + 1) * 12}%` },
-            ]}
-          />
-        ))}
-      </View>
-      <Text style={placeholderStyles.label}>{labels[scene] ?? "GAME VIEW"}</Text>
-      <Text style={placeholderStyles.hint}>Screenshot will be placed here</Text>
-    </View>
+    <Image
+      source={source}
+      style={placeholderStyles.image}
+      resizeMode="cover"
+    />
   );
 }
 
 const placeholderStyles = StyleSheet.create({
-  container: {
+  image: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#080c10",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  gridOverlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  scanline: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: "rgba(0, 180, 216, 0.04)",
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: "700",
-    letterSpacing: 4,
-    color: "rgba(107, 132, 152, 0.3)",
-  },
-  hint: {
-    fontSize: 10,
-    color: "rgba(107, 132, 152, 0.2)",
-    marginTop: 6,
+    width: "100%",
+    height: "100%",
   },
 });
 
