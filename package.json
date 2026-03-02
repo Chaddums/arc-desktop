@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "build:web": "npx expo export --platform web",
     "electron": "npm run build:web && electron electron/main.js",
-    "electron-dev": "electron electron/main.js --dev",
+    "electron-dev": "npm run build:web && electron electron/main.js --dev",
     "dist": "npm run build:web && electron-builder --win --config.win.signAndEditExecutable=false"
   },
   "dependencies": {

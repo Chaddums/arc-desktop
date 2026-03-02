@@ -13,13 +13,53 @@ const LEGACY_SECTIONS_KEY = "@arcview/overlay-sections";
 
 export type AnchorPosition = "top-right" | "top-left" | "bottom-right" | "bottom-left";
 
-export type SectionId = "eventFeed" | "activeQuests" | "squadLoadout" | "mapBriefing";
+export type SectionId =
+  | "eventFeed"
+  | "activeQuests"
+  | "squadLoadout"
+  | "mapBriefing"
+  // Tier 1 — new HUD panels
+  | "questTracker"
+  | "buildAdvice"
+  | "dailyQuests"
+  // Tier 2 — context-aware panels (show based on detected menu)
+  | "inventoryContext"
+  | "traderContext"
+  | "mapSelectorContext"
+  | "workshopContext"
+  | "mapInspectorContext";
+
+export type MenuState =
+  | "none"
+  | "inventory"
+  | "stash"
+  | "trader_menu"
+  | "workshop"
+  | "map_selector"
+  | "map_inspector";
+
+/** Which menu state triggers each context section */
+export const CONTEXT_SECTION_TRIGGERS: Partial<Record<SectionId, MenuState[]>> = {
+  inventoryContext: ["inventory", "stash"],
+  traderContext: ["trader_menu"],
+  mapSelectorContext: ["map_selector"],
+  workshopContext: ["workshop"],
+  mapInspectorContext: ["map_inspector"],
+};
 
 export interface OverlaySections {
   eventFeed: boolean;
   activeQuests: boolean;
   squadLoadout: boolean;
   mapBriefing: boolean;
+  questTracker: boolean;
+  buildAdvice: boolean;
+  dailyQuests: boolean;
+  inventoryContext: boolean;
+  traderContext: boolean;
+  mapSelectorContext: boolean;
+  workshopContext: boolean;
+  mapInspectorContext: boolean;
 }
 
 export interface SectionPosition {
@@ -33,6 +73,7 @@ export interface SectionConfig {
   order: number;
   locked: boolean;
   position?: SectionPosition;
+  width?: number;
 }
 
 export interface HudColorConfig {
@@ -46,7 +87,7 @@ export interface OverlayConfig {
   sectionConfigs: SectionConfig[];
   opacity: number;
   scale: number;
-  anchor: AnchorPosition;
+  anchor: AnchorPosition | null;
   hudColors: HudColorConfig | null;
 }
 
@@ -55,6 +96,14 @@ const DEFAULT_SECTION_CONFIGS: SectionConfig[] = [
   { id: "activeQuests", enabled: true, order: 1, locked: false },
   { id: "squadLoadout", enabled: true, order: 2, locked: false },
   { id: "mapBriefing", enabled: false, order: 3, locked: false },
+  { id: "questTracker", enabled: false, order: 4, locked: false },
+  { id: "buildAdvice", enabled: false, order: 5, locked: false },
+  { id: "dailyQuests", enabled: false, order: 6, locked: false },
+  { id: "inventoryContext", enabled: true, order: 7, locked: false },
+  { id: "traderContext", enabled: true, order: 8, locked: false },
+  { id: "mapSelectorContext", enabled: true, order: 9, locked: false },
+  { id: "workshopContext", enabled: true, order: 10, locked: false },
+  { id: "mapInspectorContext", enabled: true, order: 11, locked: false },
 ];
 
 const DEFAULTS: OverlayConfig = {
@@ -63,20 +112,34 @@ const DEFAULTS: OverlayConfig = {
     activeQuests: true,
     squadLoadout: true,
     mapBriefing: false,
+    questTracker: false,
+    buildAdvice: false,
+    dailyQuests: false,
+    inventoryContext: true,
+    traderContext: true,
+    mapSelectorContext: true,
+    workshopContext: true,
+    mapInspectorContext: true,
   },
   sectionConfigs: DEFAULT_SECTION_CONFIGS,
   opacity: 0.92,
   scale: 1.0,
-  anchor: "bottom-right",
+  anchor: null,
   hudColors: null,
 };
 
+/** All known section IDs in default order */
+const ALL_SECTION_IDS: SectionId[] = [
+  "eventFeed", "activeQuests", "squadLoadout", "mapBriefing",
+  "questTracker", "buildAdvice", "dailyQuests",
+  "inventoryContext", "traderContext", "mapSelectorContext", "workshopContext", "mapInspectorContext",
+];
+
 /** Derive sectionConfigs from legacy sections booleans */
 function deriveSectionConfigs(sections: OverlaySections): SectionConfig[] {
-  const ids: SectionId[] = ["eventFeed", "activeQuests", "squadLoadout", "mapBriefing"];
-  return ids.map((id, i) => ({
+  return ALL_SECTION_IDS.map((id, i) => ({
     id,
-    enabled: sections[id],
+    enabled: sections[id] ?? false,
     order: i,
     locked: false,
   }));
@@ -84,14 +147,11 @@ function deriveSectionConfigs(sections: OverlaySections): SectionConfig[] {
 
 /** Sync sections booleans from sectionConfigs */
 function syncSectionsFromConfigs(configs: SectionConfig[]): OverlaySections {
-  const sections: OverlaySections = {
-    eventFeed: false,
-    activeQuests: false,
-    squadLoadout: false,
-    mapBriefing: false,
-  };
+  const sections = { ...DEFAULTS.sections };
   for (const cfg of configs) {
-    sections[cfg.id] = cfg.enabled;
+    if (cfg.id in sections) {
+      sections[cfg.id] = cfg.enabled;
+    }
   }
   return sections;
 }
@@ -110,7 +170,19 @@ export function useOverlayConfig() {
           // Migration: if no sectionConfigs, derive from sections
           if (!parsed.sectionConfigs) {
             loaded.sectionConfigs = deriveSectionConfigs(loaded.sections);
+          } else {
+            // Migration: add any new section IDs missing from saved configs
+            const savedIds = new Set(loaded.sectionConfigs.map((c: SectionConfig) => c.id));
+            const maxOrder = Math.max(...loaded.sectionConfigs.map((c: SectionConfig) => c.order), -1);
+            let nextOrder = maxOrder + 1;
+            for (const def of DEFAULT_SECTION_CONFIGS) {
+              if (!savedIds.has(def.id)) {
+                loaded.sectionConfigs.push({ ...def, order: nextOrder++ });
+              }
+            }
           }
+          // Merge any new section keys into sections
+          loaded.sections = { ...DEFAULTS.sections, ...loaded.sections };
           if (!parsed.hudColors) {
             loaded.hudColors = null;
           }
@@ -155,9 +227,15 @@ export function useOverlayConfig() {
     [config, persist],
   );
 
+  /** Reset layout to stacked defaults in the chosen corner + clear saved positions */
   const updateAnchor = useCallback(
-    (anchor: AnchorPosition) => {
-      persist({ ...config, anchor });
+    (anchor: AnchorPosition | null) => {
+      // Clear all saved positions so sections stack from scratch
+      const resetConfigs = config.sectionConfigs.map((cfg) => {
+        const { position, width, ...rest } = cfg;
+        return rest as SectionConfig;
+      });
+      persist({ ...config, anchor, sectionConfigs: resetConfigs });
     },
     [config, persist],
   );
@@ -194,6 +272,16 @@ export function useOverlayConfig() {
     [config, persist],
   );
 
+  const updateSectionWidth = useCallback(
+    (id: SectionId, width: number) => {
+      const newConfigs = config.sectionConfigs.map((cfg) =>
+        cfg.id === id ? { ...cfg, width } : cfg,
+      );
+      persist({ ...config, sectionConfigs: newConfigs });
+    },
+    [config, persist],
+  );
+
   const updateHudColors = useCallback(
     (colors: HudColorConfig | null) => {
       persist({ ...config, hudColors: colors });
@@ -213,6 +301,7 @@ export function useOverlayConfig() {
     reorderSections,
     toggleSectionLock,
     updateSectionPosition,
+    updateSectionWidth,
     updateHudColors,
     resetToDefaults,
   };

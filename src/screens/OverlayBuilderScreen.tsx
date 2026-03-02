@@ -14,7 +14,6 @@ import {
   StyleSheet,
   Switch,
   TextInput,
-  Image,
   useWindowDimensions,
 } from "react-native";
 import { Colors, fonts, spacing, fontSize, textPresets } from "../theme";
@@ -48,6 +47,14 @@ const SECTION_LABELS: Record<SectionId, { label: string; desc: string }> = {
   activeQuests: { label: "Active Quests", desc: "Tracked quest progress from all traders" },
   squadLoadout: { label: "Squad Loadout", desc: "Teammate weapons, gear & online status" },
   mapBriefing: { label: "Map Briefing", desc: "Map intel, risk assessment & threat summary" },
+  questTracker: { label: "Quest Tracker", desc: "Auto-tracking checklist grouped by map for raid planning" },
+  buildAdvice: { label: "Build Advice", desc: "Skill & item recommendations for your playstyle" },
+  dailyQuests: { label: "Daily Quests", desc: "Manual daily quest tracking with auto-reset" },
+  inventoryContext: { label: "Inventory Intel", desc: "Stash verdicts & quest items (shows in inventory)" },
+  traderContext: { label: "Trader Intel", desc: "Available quest alerts (shows at traders)" },
+  mapSelectorContext: { label: "Map Select Intel", desc: "Quest alignment & events (shows in map select)" },
+  workshopContext: { label: "Workshop Guide", desc: "Workbench listing & crafts (shows in workshop)" },
+  mapInspectorContext: { label: "Map Objectives", desc: "Filtered quest objectives (shows on map view)" },
 };
 
 const OPACITY_STEPS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
@@ -100,10 +107,12 @@ export default function OverlayBuilderScreen() {
     reorderSections,
     toggleSectionLock,
     updateSectionPosition,
+    updateSectionWidth,
     updateHudColors,
     resetToDefaults,
   } = useOverlayConfig();
   const [activeScene, setActiveScene] = useState("gameplay");
+  const [showResetPosition, setShowResetPosition] = useState(false);
 
   const isWide = width >= 860;
 
@@ -185,7 +194,7 @@ export default function OverlayBuilderScreen() {
 
   // ─── Apply to Overlay ────────────────────────────────────────
   const handleApply = () => {
-    if (window.arcDesktop?.setOverlayPosition) {
+    if (config.anchor && window.arcDesktop?.setOverlayPosition) {
       window.arcDesktop.setOverlayPosition(config.anchor);
     }
     if (window.arcDesktop?.setOverlayAppearance) {
@@ -258,9 +267,8 @@ export default function OverlayBuilderScreen() {
             !isWide && styles.previewPaneStacked,
           ]}
         >
-          {/* Screenshot placeholder */}
-          <View style={styles.screenshotBg}>
-            <ScenePlaceholder scene={activeScene} />
+          {/* Screenshot placeholder + overlay preview */}
+          <SceneBackground scene={activeScene}>
             <OverlayPreview
               sectionConfigs={config.sectionConfigs}
               opacity={config.opacity}
@@ -268,8 +276,9 @@ export default function OverlayBuilderScreen() {
               anchor={config.anchor}
               hudColors={config.hudColors}
               onSectionPositionChange={updateSectionPosition}
+              onSectionWidthChange={updateSectionWidth}
             />
-          </View>
+          </SceneBackground>
         </View>
 
         {/* Control Panel */}
@@ -508,16 +517,30 @@ export default function OverlayBuilderScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Position */}
-          <View style={[styles.controlSection, { borderColor: C.border }]}>
-            <Text style={[styles.controlTitle, { color: C.textSecondary }]}>
-              POSITION
+          {/* Reset Position (collapsible) */}
+          <TouchableOpacity
+            onPress={() => setShowResetPosition((v) => !v)}
+            style={[styles.resetPositionToggle, { borderColor: C.border }]}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.resetPositionLabel, { color: C.textSecondary }]}>
+              {showResetPosition ? "\u25BC" : "\u25B6"} Reset Layout to Corner
             </Text>
-            <Text style={[styles.positionHint, { color: C.textMuted }]}>
-              Choose which corner of the screen the overlay anchors to
-            </Text>
-            <OverlayCornerPicker value={config.anchor} onChange={updateAnchor} />
-          </View>
+          </TouchableOpacity>
+          {showResetPosition && (
+            <View style={[styles.controlSection, { borderColor: C.border, marginTop: 0, borderTopWidth: 0, borderTopLeftRadius: 0, borderTopRightRadius: 0 }]}>
+              <Text style={[styles.positionHint, { color: C.textMuted }]}>
+                Resets all card positions to a stacked default in the chosen corner
+              </Text>
+              <OverlayCornerPicker
+                value={config.anchor}
+                onChange={(anchor) => {
+                  updateAnchor(anchor);
+                  setShowResetPosition(false);
+                }}
+              />
+            </View>
+          )}
 
           {/* Actions */}
           <View style={styles.actionRow}>
@@ -613,27 +636,25 @@ const colorStyles = StyleSheet.create({
   },
 });
 
-/** Game screenshot background for overlay preview */
-function ScenePlaceholder({ scene }: { scene: string }) {
+/** Game screenshot background — uses CSS background-image so it can never z-fight with children */
+function SceneBackground({ scene, children }: { scene: string; children: React.ReactNode }) {
   const source = SCENE_IMAGES[scene];
-  if (!source) return null;
-
+  // Expo web: require() for images returns a string URL or {uri: string}
+  const uri = typeof source === "string" ? source : source?.uri ?? source?.default ?? "";
   return (
-    <Image
-      source={source}
-      style={placeholderStyles.image}
-      resizeMode="cover"
-    />
+    <div
+      style={{
+        flex: 1,
+        position: "relative",
+        backgroundImage: uri ? `url(${uri})` : undefined,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
+      {children}
+    </div>
   );
 }
-
-const placeholderStyles = StyleSheet.create({
-  image: {
-    ...StyleSheet.absoluteFillObject,
-    width: "100%",
-    height: "100%",
-  },
-});
 
 const styles = StyleSheet.create({
   container: {
@@ -687,10 +708,6 @@ const styles = StyleSheet.create({
   previewPaneStacked: {
     minHeight: 320,
     marginBottom: 12,
-  },
-  screenshotBg: {
-    flex: 1,
-    position: "relative",
   },
   // ─── Control Panel ────────────────────────────────────────
   controlPanel: {
@@ -837,7 +854,18 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     fontWeight: "600",
   },
-  // ─── Position ─────────────────────────────────────────────
+  // ─── Reset Position ──────────────────────────────────────
+  resetPositionToggle: {
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  resetPositionLabel: {
+    fontSize: fontSize.xs,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+  },
   positionHint: {
     fontSize: fontSize.xs,
     marginBottom: 4,

@@ -48,7 +48,7 @@ let mainWindow = null;
 let overlayWindow = null;
 let tray = null;
 let currentMode = "main"; // "main" | "overlay"
-let serverUrl = DEV ? "http://localhost:8081" : "app://dist/index.html";
+let serverUrl = "app://dist/index.html";
 let gameDetector = null;
 let screenCapture = null;
 
@@ -70,6 +70,8 @@ function createMainWindow(url) {
 
   const onScreen = saved && isPositionOnScreen(saved.x, saved.y);
 
+  const iconPath = path.join(__dirname, "..", "assets", "icon.png");
+
   mainWindow = new BrowserWindow({
     width: saved?.width ?? 900,
     height: saved?.height ?? 650,
@@ -82,6 +84,7 @@ function createMainWindow(url) {
     frame: false,
     titleBarStyle: "hidden",
     show: false,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -175,8 +178,14 @@ function getDefaultOverlayPosition(width, height) {
 /**
  * Find the game window and position the overlay at its bottom-right,
  * aligned with the Steam overlay icon area.
+ * Skips if user already has a saved position (from dragging or anchor picker).
  */
 async function positionOverlayOnGame() {
+  const saved = loadOverlaySettings();
+  if (saved && isPositionOnScreen(saved.x, saved.y)) {
+    // User already has a saved position — don't overwrite it
+    return;
+  }
   try {
     const { getWindowBounds } = require("./windowFinder");
     const gameBounds = await getWindowBounds("PioneerGame");
@@ -192,26 +201,38 @@ async function positionOverlayOnGame() {
   // Fallback: saved position or cursor-based default will be used
 }
 
-function createOverlayWindow(url) {
+async function createOverlayWindow(url) {
   const saved = loadOverlaySettings();
-  const initHeight = 200;
-  const startPos = (saved && isPositionOnScreen(saved.x, saved.y))
-    ? { x: saved.x, y: saved.y }
-    : getDefaultOverlayPosition(OVERLAY_WIDTH, initHeight);
-
   overlayLocked = !!(saved && saved.locked);
 
+  // Size overlay to game window so normalized positions from the builder map 1:1.
+  // Falls back to full display if game isn't running.
+  let bounds;
+  try {
+    const { getWindowBounds } = require("./windowFinder");
+    const gameBounds = await getWindowBounds("PioneerGame");
+    if (gameBounds && gameBounds.width > 100 && gameBounds.height > 100) {
+      bounds = gameBounds;
+    }
+  } catch {}
+
+  if (!bounds) {
+    const cursorPoint = screen.getCursorScreenPoint();
+    const display = screen.getDisplayNearestPoint(cursorPoint);
+    bounds = display.bounds;
+  }
+
   overlayWindow = new BrowserWindow({
-    width: OVERLAY_WIDTH,
-    height: initHeight,
-    x: startPos.x,
-    y: startPos.y,
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     resizable: false,
-    movable: !overlayLocked,
+    movable: false,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -223,18 +244,6 @@ function createOverlayWindow(url) {
   // "floating" stays above normal windows and most games without fighting
   // the GPU the way "screen-saver" does (avoids DXGI_ERROR_DEVICE_REMOVED)
   overlayWindow.setAlwaysOnTop(true, "floating");
-
-  // Persist position on drag (debounced)
-  let overlayMoveTimer = null;
-  overlayWindow.on("move", () => {
-    if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    clearTimeout(overlayMoveTimer);
-    overlayMoveTimer = setTimeout(() => {
-      if (!overlayWindow || overlayWindow.isDestroyed()) return;
-      const { x, y } = overlayWindow.getBounds();
-      saveOverlaySettings({ x, y });
-    }, 500);
-  });
 
   overlayWindow.once("ready-to-show", () => {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
@@ -262,10 +271,7 @@ async function toggleMode() {
       mainWindow.hide();
     }
     if (!overlayWindow || overlayWindow.isDestroyed()) {
-      // Try to position on the game's display
-      await positionOverlayOnGame();
-      // First creation — ready-to-show handler will call .show()
-      createOverlayWindow(serverUrl);
+      await createOverlayWindow(serverUrl);
     } else {
       overlayWindow.show();
     }
@@ -405,18 +411,8 @@ ipcMain.on("set-ignore-mouse-events", (event, ignore, opts) => {
   }
 });
 
-ipcMain.on("overlay-resize", (_event, width, height) => {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const bounds = overlayWindow.getBounds();
-  let newY = bounds.y;
-  // If bottom edge would exceed screen, push y upward (overlay grows up from bottom)
-  const display = screen.getDisplayMatching(bounds);
-  const screenBottom = display.workArea.y + display.workArea.height;
-  if (newY + height > screenBottom) {
-    newY = screenBottom - height;
-  }
-  overlayWindow.setBounds({ x: bounds.x, y: newY, width: Math.round(width), height: Math.round(height) });
-});
+// overlay-resize is a no-op — overlay is now full-screen
+ipcMain.on("overlay-resize", () => {});
 
 ipcMain.on("event-started", (_event, eventData) => {
   if (!alertSettings.notifyOnEvent) return;
@@ -441,8 +437,8 @@ ipcMain.on("update-alert-settings", (_event, settings) => {
 // ─── Overlay Lock ───────────────────────────────────────────────
 function applyOverlayLockState() {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  overlayWindow.setMovable(!overlayLocked);
-  // Always forward so the renderer can detect hover on the lock button
+  // Full-screen overlay is never movable — cards are positioned inside it
+  // Always forward so the renderer can detect hover on cards
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
 }
 
@@ -498,29 +494,10 @@ ipcMain.on("overlay-stop-drag", () => {
 });
 
 // ─── Overlay Config (Builder) ────────────────────────────────────
-ipcMain.on("set-overlay-position", (_event, anchor) => {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const display = screen.getDisplayMatching(overlayWindow.getBounds());
-  const { x, y, width: dw, height: dh } = display.workArea;
-  const bounds = overlayWindow.getBounds();
-
-  let newX = bounds.x;
-  let newY = bounds.y;
-
-  if (anchor.includes("left")) {
-    newX = x + OVERLAY_MARGIN;
-  } else {
-    newX = x + dw - bounds.width - OVERLAY_MARGIN;
-  }
-  if (anchor.includes("top")) {
-    newY = y + OVERLAY_MARGIN;
-  } else {
-    newY = y + dh - bounds.height - OVERLAY_MARGIN;
-  }
-
-  overlayWindow.setPosition(newX, newY);
-  saveOverlaySettings({ x: newX, y: newY });
-});
+// set-overlay-position is a no-op — overlay is full-screen, positions are
+// handled as normalized coordinates inside the renderer. Anchor resets are
+// handled by useOverlayConfig clearing section positions.
+ipcMain.on("set-overlay-position", () => {});
 
 ipcMain.on("set-overlay-appearance", (_event, settings) => {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
@@ -572,6 +549,21 @@ ipcMain.handle("clear-ocr-debug-log", () => {
 
 ipcMain.handle("get-ocr-log-path", () => {
   return ocrDebugLog.getLogPath();
+});
+
+// ─── App Reset ──────────────────────────────────────────────────
+ipcMain.handle("reset-app", async () => {
+  const userData = app.getPath("userData");
+  // Clear Electron-side persisted files
+  for (const file of [GEOMETRY_FILE, OVERLAY_SETTINGS_FILE]) {
+    try { fs.unlinkSync(file); } catch { /* ignore */ }
+  }
+  // Clear localStorage / sessionStorage by wiping the webStorage folder
+  const localStoragePath = path.join(userData, "Local Storage");
+  try { fs.rmSync(localStoragePath, { recursive: true, force: true }); } catch { /* ignore */ }
+  // Relaunch
+  app.relaunch();
+  app.exit(0);
 });
 
 // ─── Custom Protocol ────────────────────────────────────────────

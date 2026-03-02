@@ -8,8 +8,9 @@ import { Colors } from "../theme";
 import type { AnchorPosition } from "../hooks/useOverlayConfig";
 
 interface Props {
-  value: AnchorPosition;
-  onChange: (anchor: AnchorPosition) => void;
+  value: AnchorPosition | null;
+  onChange: (anchor: AnchorPosition | null) => void;
+  disabled?: boolean;
 }
 
 const CORNERS: { key: AnchorPosition; row: number; col: number }[] = [
@@ -19,9 +20,9 @@ const CORNERS: { key: AnchorPosition; row: number; col: number }[] = [
   { key: "bottom-right", row: 1, col: 1 },
 ];
 
-export default function OverlayCornerPicker({ value, onChange }: Props) {
+export default function OverlayCornerPicker({ value, onChange, disabled }: Props) {
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, disabled && styles.containerDisabled]}>
       <View style={styles.screen}>
         {CORNERS.map(({ key, row, col }) => {
           const active = value === key;
@@ -29,7 +30,8 @@ export default function OverlayCornerPicker({ value, onChange }: Props) {
             <TouchableOpacity
               key={key}
               activeOpacity={0.7}
-              onPress={() => onChange(key)}
+              disabled={disabled}
+              onPress={() => onChange(active ? null : key)}
               style={[
                 styles.corner,
                 { top: row === 0 ? 4 : undefined, bottom: row === 1 ? 4 : undefined },
@@ -51,6 +53,9 @@ const styles = StyleSheet.create({
   container: {
     alignItems: "center",
     paddingVertical: 8,
+  },
+  containerDisabled: {
+    opacity: 0.4,
   },
   screen: {
     width: 120,

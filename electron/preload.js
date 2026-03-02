@@ -100,6 +100,9 @@ contextBridge.exposeInMainWorld("arcDesktop", {
   /** Restart the app */
   restartApp: () => ipcRenderer.send("restart-app"),
 
+  /** Reset all app data and relaunch */
+  resetApp: () => ipcRenderer.invoke("reset-app"),
+
   // ─── Overlay Lock ──────────────────────────────────────────────
 
   /** Set overlay locked state */

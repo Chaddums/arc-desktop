@@ -18,6 +18,7 @@ import React, { useState, useCallback, useMemo } from "react";
 import {
   View,
   Text,
+  Image,
   ScrollView,
   TouchableOpacity,
   RefreshControl,
@@ -621,7 +622,10 @@ export default function IntelScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: C.bg }]}>
-      <Text style={[styles.header, { color: C.text }]}>Intel</Text>
+      <View style={styles.headerRow}>
+        <Image source={require("../../assets/frank-small.png")} resizeMode="contain" style={styles.frankIcon} />
+        <Text style={[styles.header, { color: C.text }]}>Intel</Text>
+      </View>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -649,12 +653,21 @@ export default function IntelScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    fontSize: 20,
-    fontWeight: "700",
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xxs,
+  },
+  frankIcon: {
+    width: 32,
+    height: 24,
+    marginRight: 6,
+  },
+  header: {
+    fontSize: 20,
+    fontWeight: "700",
   },
   scroll: { flex: 1 },
   scrollContent: { padding: spacing.md, paddingBottom: 12 },

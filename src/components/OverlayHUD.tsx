@@ -5,8 +5,9 @@
  * Supports dynamic section ordering and HUD color overrides.
  */
 
-import React, { useEffect, useCallback, useState, useRef, useMemo } from "react";
+import React, { useEffect, useCallback, useState, useMemo } from "react";
 import { View, Text, StyleSheet } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEventTimer } from "../hooks/useEventTimer";
 import { useAutoQuestTracker } from "../hooks/useAutoQuestTracker";
 import { useQuestTracker } from "../hooks/useQuestTracker";
@@ -25,10 +26,23 @@ import { useStashOrganizer } from "../hooks/useStashOrganizer";
 import { formatCountdown } from "../utils/format";
 import { Colors, fonts } from "../theme";
 import type { SectionId, SectionConfig, HudColorConfig } from "../hooks/useOverlayConfig";
+import { useQuestPairing } from "../hooks/useQuestPairing";
+import { useBuildAdvisor } from "../hooks/useBuildAdvisor";
+import { useDailyQuests } from "../hooks/useDailyQuests";
+// Menu detection ready for future use when OCR reliably detects game menus
+// import { useMenuDetection } from "../hooks/useMenuDetection";
 import OverlayEventFeed from "./OverlayEventFeed";
 import OverlayActiveQuests from "./OverlayActiveQuests";
 import OverlaySquadLoadout from "./OverlaySquadLoadout";
 import OverlayMapBriefing from "./OverlayMapBriefing";
+import OverlayQuestTracker from "./OverlayQuestTracker";
+import OverlayBuildAdvice from "./OverlayBuildAdvice";
+import OverlayDailyQuests from "./OverlayDailyQuests";
+import OverlayInventoryContext from "./OverlayInventoryContext";
+import OverlayTraderContext from "./OverlayTraderContext";
+import OverlayMapSelectorContext from "./OverlayMapSelectorContext";
+import OverlayWorkshopContext from "./OverlayWorkshopContext";
+import OverlayMapInspectorContext from "./OverlayMapInspectorContext";
 import OverlayChecklist from "./OverlayChecklist";
 import OverlayQuestProgress from "./OverlayQuestProgress";
 import OverlaySquadQuests from "./OverlaySquadQuests";
@@ -45,11 +59,34 @@ const BUILD_CLASS_COLORS: Record<string, string> = {
   Hybrid: Colors.amber,
 };
 
+const SECTION_LABELS: Record<SectionId, string> = {
+  eventFeed: "EVENT FEED",
+  activeQuests: "ACTIVE QUESTS",
+  squadLoadout: "SQUAD LOADOUT",
+  mapBriefing: "MAP BRIEFING",
+  questTracker: "QUEST TRACKER",
+  buildAdvice: "BUILD ADVICE",
+  dailyQuests: "DAILY QUESTS",
+  inventoryContext: "INVENTORY",
+  traderContext: "TRADERS",
+  mapSelectorContext: "MAP SELECTOR",
+  workshopContext: "WORKSHOP",
+  mapInspectorContext: "MAP INSPECTOR",
+};
+
 const DEFAULT_SECTION_ORDER: SectionId[] = [
   "eventFeed",
   "activeQuests",
   "squadLoadout",
   "mapBriefing",
+  "questTracker",
+  "buildAdvice",
+  "dailyQuests",
+  "inventoryContext",
+  "traderContext",
+  "mapSelectorContext",
+  "workshopContext",
+  "mapInspectorContext",
 ];
 
 export default function OverlayHUD() {
@@ -75,24 +112,95 @@ export default function OverlayHUD() {
   const { squad } = useSquad();
   const { sections, toggleSection } = useOverlaySections();
 
-  // ─── Dynamic config from builder (via IPC) ────────────────────
-  const [sectionOrder, setSectionOrder] = useState<SectionId[]>(DEFAULT_SECTION_ORDER);
-  const [hudColors, setHudColors] = useState<HudColorConfig | null>(null);
+  // ─── Tier 1 + Tier 2 hooks ──────────────────────────────────
+  const { pairings: questPairings } = useQuestPairing(questsByTrader, completedIds);
+  const { getAdvice: getBuildAdvice } = useBuildAdvisor(items, [], {});
+  const dailyQuests = useDailyQuests();
+  // const { menuState } = useMenuDetection();
 
+  // ─── Dynamic config from builder (via IPC or AsyncStorage) ─────
+  const [sectionOrder, setSectionOrder] = useState<SectionId[]>(DEFAULT_SECTION_ORDER);
+  const [savedConfigs, setSavedConfigs] = useState<SectionConfig[]>([]);
+  const [hudColors, setHudColors] = useState<HudColorConfig | null>(null);
+  const [enabledSections, setEnabledSections] = useState<Set<SectionId>>(
+    new Set(DEFAULT_SECTION_ORDER),
+  );
+
+  /** Extract order, enabled set, and full configs from raw sectionConfigs */
+  const applySectionConfigs = useCallback((cfgs: SectionConfig[]) => {
+    const sorted = [...cfgs].sort((a, b) => a.order - b.order);
+    setSectionOrder(sorted.map((s) => s.id));
+    setEnabledSections(new Set(sorted.filter((s) => s.enabled).map((s) => s.id)));
+    setSavedConfigs(sorted);
+  }, []);
+
+  // Load saved config from AsyncStorage on mount and apply to overlay window
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem("@arcview/overlay-config");
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (saved.sectionConfigs) {
+          applySectionConfigs(saved.sectionConfigs);
+        }
+        if (saved.hudColors !== undefined) {
+          setHudColors(saved.hudColors);
+        }
+        // Apply anchor position to overlay window
+        if (saved.anchor) {
+          window.arcDesktop?.setOverlayPosition(saved.anchor);
+        }
+        // Apply appearance settings to overlay window
+        if (saved.opacity != null || saved.scale != null) {
+          window.arcDesktop?.setOverlayAppearance({
+            opacity: saved.opacity ?? 0.92,
+            scale: saved.scale ?? 1.0,
+          });
+        }
+      } catch {}
+    })();
+  }, [applySectionConfigs]);
+
+  // Listen for IPC config pushes from the builder
   useEffect(() => {
     const unsub = window.arcDesktop?.onOverlayConfigChanged((cfg: any) => {
       if (cfg.sectionConfigs) {
-        const sorted = [...cfg.sectionConfigs].sort(
-          (a: SectionConfig, b: SectionConfig) => a.order - b.order,
-        );
-        setSectionOrder(sorted.map((s: SectionConfig) => s.id));
+        applySectionConfigs(cfg.sectionConfigs);
       }
       if (cfg.hudColors !== undefined) {
         setHudColors(cfg.hudColors);
       }
     });
     return () => unsub?.();
-  }, []);
+  }, [applySectionConfigs]);
+
+  // ─── Build advice (memoized) ──────────────────────────────────
+  const buildAdvice = useMemo(() => {
+    if (!sections.buildAdvice) return null;
+    return getBuildAdvice("Balanced");
+  }, [sections.buildAdvice, getBuildAdvice]);
+
+  // ─── Quest item needs for inventory context ──────────────────
+  const neededQuestItems = useMemo(() => {
+    const needed: { name: string; quantity: number; questName: string }[] = [];
+    for (const quest of allQuests) {
+      if (completedIds.has(quest.id)) continue;
+      if (!quest.objectives) continue;
+      for (const obj of quest.objectives) {
+        const text = typeof obj === "string" ? obj : "";
+        const collectMatch = text.match(/(?:collect|find|gather|retrieve)\s+(\d+)\s+(.+)/i);
+        if (collectMatch) {
+          needed.push({
+            name: collectMatch[2].trim(),
+            quantity: parseInt(collectMatch[1], 10) || 1,
+            questName: quest.name?.en || quest.id,
+          });
+        }
+      }
+    }
+    return needed.slice(0, 6);
+  }, [allQuests, completedIds]);
 
   // ─── Derived state ─────────────────────────────────────────────
   const nextEvent = upcomingEvents[0];
@@ -122,22 +230,42 @@ export default function OverlayHUD() {
     });
   }, [mapRec.selectedMap, myLoadout.equippedItems, raidLog.entries, bots, activeEvents]);
 
-  // ─── ResizeObserver ────────────────────────────────────────────
-  const contentRef = useRef<HTMLDivElement>(null);
+  // ─── Positioned sections (denormalize 0-1 → screen pixels) ────
+  const STRIP_HEIGHT = 52;
+  const CARD_HEIGHT_EST = 80;
+  const DEFAULT_CARD_FRAC = 0.2; // default card width as fraction of screen
 
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el || !window.arcDesktop) return;
+  const visibleSections = useMemo(() => {
+    const sw = typeof window !== "undefined" ? window.innerWidth : 1920;
+    const sh = typeof window !== "undefined" ? window.innerHeight : 1080;
+    // Build a stacked fallback for sections without saved positions
+    let fallbackY = STRIP_HEIGHT + 4;
+    return sectionOrder
+      .filter((id) => enabledSections.has(id))
+      .map((id) => {
+        const cfg = savedConfigs.find((c) => c.id === id);
+        let position: { x: number; y: number };
+        let width: number;
 
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const height = Math.min(Math.ceil(entry.contentRect.height), 600);
-        window.arcDesktop?.resizeOverlay(420, height);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+        if (cfg?.position && cfg.position.x <= 1 && cfg.position.y <= 1) {
+          // Normalized position → denormalize to screen pixels
+          position = { x: cfg.position.x * sw, y: cfg.position.y * sh };
+        } else {
+          // No saved position or legacy pixel format → stack vertically
+          position = { x: 10, y: fallbackY };
+        }
+
+        // Denormalize width (fraction of screen width)
+        if (cfg?.width && cfg.width <= 1) {
+          width = cfg.width * sw;
+        } else {
+          width = DEFAULT_CARD_FRAC * sw;
+        }
+
+        fallbackY = Math.max(fallbackY, position.y + CARD_HEIGHT_EST + 4);
+        return { id, position, width };
+      });
+  }, [sectionOrder, enabledSections, savedConfigs]);
 
   // ─── Overlay lock state ────────────────────────────────────────
   useEffect(() => {
@@ -169,26 +297,6 @@ export default function OverlayHUD() {
 
   const handleLockMouseLeave = useCallback(() => {
     window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
-  }, []);
-
-  const handleDragMouseEnter = useCallback(() => {
-    if (locked) return;
-    window.arcDesktop?.setIgnoreMouseEvents(false);
-  }, [locked]);
-
-  const handleDragMouseDown = useCallback(() => {
-    if (locked) return;
-    window.arcDesktop?.overlayStartDrag();
-  }, [locked]);
-
-  const handleDragMouseUp = useCallback(() => {
-    window.arcDesktop?.overlayStopDrag();
-  }, []);
-
-  useEffect(() => {
-    const onMouseUp = () => window.arcDesktop?.overlayStopDrag();
-    window.addEventListener("mouseup", onMouseUp);
-    return () => window.removeEventListener("mouseup", onMouseUp);
   }, []);
 
   // ─── Border style ─────────────────────────────────────────────
@@ -254,35 +362,107 @@ export default function OverlayHUD() {
             onToggle={() => toggleSection("mapBriefing")}
           />
         );
+
+      // ─── Tier 1 panels ──────────────────────────────────────
+      case "questTracker":
+        return (
+          <OverlayQuestTracker
+            key={id}
+            pairings={questPairings}
+            completedIds={completedIds}
+            expanded={sections.questTracker}
+            onToggle={() => toggleSection("questTracker")}
+          />
+        );
+      case "buildAdvice":
+        return (
+          <OverlayBuildAdvice
+            key={id}
+            advice={buildAdvice}
+            expanded={sections.buildAdvice}
+            onToggle={() => toggleSection("buildAdvice")}
+          />
+        );
+      case "dailyQuests":
+        return (
+          <OverlayDailyQuests
+            key={id}
+            quests={dailyQuests.quests}
+            allChecked={dailyQuests.allChecked}
+            onToggle={dailyQuests.toggleQuest}
+            expanded={sections.dailyQuests}
+            onToggleExpand={() => toggleSection("dailyQuests")}
+          />
+        );
+
+      // ─── Tier 2 context panels (menu-aware) ─────────────────
+      case "inventoryContext":
+        return (
+          <OverlayInventoryContext
+            key={id}
+            stats={stashOrganizer.stats}
+            loading={stashOrganizer.loading}
+            neededItems={neededQuestItems}
+          />
+        );
+      case "traderContext":
+        return (
+          <OverlayTraderContext
+            key={id}
+            questsByTrader={questsByTrader}
+            completedIds={completedIds}
+          />
+        );
+      case "mapSelectorContext":
+        return (
+          <OverlayMapSelectorContext
+            key={id}
+            pairings={questPairings}
+            activeEvents={activeEvents}
+            maps={mapRec.maps}
+          />
+        );
+      case "workshopContext":
+        return (
+          <OverlayWorkshopContext
+            key={id}
+            items={items}
+          />
+        );
+      case "mapInspectorContext":
+        return (
+          <OverlayMapInspectorContext
+            key={id}
+            quests={allQuests}
+            completedIds={completedIds}
+            currentMap={mapRec.selectedMap}
+          />
+        );
+
       default:
         return null;
     }
   };
 
   return (
-    <div
-      style={{ display: "flex", flexDirection: "column" }}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      <div ref={contentRef}>
-        {/* ─── HUD Strip (always visible) ─────────────────────── */}
-        <div style={isImminent ? imminentPulseStyle : hasActive ? sheenStyle : undefined}>
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none" }}>
+      {/* ─── HUD Strip (always visible, top-left) ────────── */}
+      <div
+        style={{
+          position: "absolute",
+          left: 10,
+          top: 10,
+          pointerEvents: "auto",
+          ...(isImminent ? imminentPulseStyle : hasActive ? sheenStyle : undefined),
+        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
           <View style={[
             styles.strip,
             borderStyle,
             borderOverride ? { borderColor: borderOverride } : undefined,
           ]}>
-            {/* Drag handle */}
-            <div
-              style={dragHandleStyle}
-              onMouseEnter={handleDragMouseEnter}
-              onMouseDown={handleDragMouseDown}
-              onMouseUp={handleDragMouseUp}
-            >
-              <Text style={styles.dragIcon}>{"\u2801\u2801\u2801"}</Text>
-            </div>
-
             {/* Loadout badge */}
             {weaponName ? (
               <View style={styles.segment}>
@@ -342,10 +522,44 @@ export default function OverlayHUD() {
           </View>
         </div>
 
-        {/* ─── Collapsible Sections (dynamic order) ──────────── */}
-        {sectionOrder.map(renderSection)}
+      {/* ─── Section cards at builder-saved positions ────── */}
+      {visibleSections.map(({ id, position, width }) => {
+        const content = renderSection(id);
+        return (
+          <div
+            key={id}
+            style={{
+              position: "absolute",
+              left: position.x,
+              top: position.y,
+              width,
+              pointerEvents: "auto",
+            }}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+          >
+            {content || (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyCardLabel}>{SECTION_LABELS[id]}</Text>
+                <Text style={styles.emptyCardHint}>Waiting for data…</Text>
+              </View>
+            )}
+          </div>
+        );
+      })}
 
-        {/* ─── Existing triggered components ──────────────────── */}
+      {/* ─── Triggered components (bottom-right area) ──── */}
+      <div
+        style={{
+          position: "absolute",
+          right: 10,
+          bottom: 10,
+          pointerEvents: "auto",
+          maxWidth: 360,
+        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
         <OverlayEventToast alerts={eventAlerts} onDismiss={dismissAlert} />
         <OverlayQuestProgress
           completionQueue={completionQueue}
@@ -370,12 +584,6 @@ export default function OverlayHUD() {
 const sheenStyle: React.CSSProperties = {
   position: "relative",
   overflow: "hidden",
-};
-
-const dragHandleStyle: React.CSSProperties = {
-  padding: "12px 14px",
-  cursor: "grab",
-  userSelect: "none",
 };
 
 const imminentPulseStyle: React.CSSProperties = {
@@ -422,11 +630,6 @@ const styles = StyleSheet.create({
   stripImminent: {
     borderColor: "rgba(230, 126, 34, 0.8)",
     borderWidth: 2,
-  },
-  dragIcon: {
-    fontSize: 16,
-    color: "rgba(107, 132, 152, 0.6)",
-    letterSpacing: 3,
   },
   segment: {
     alignItems: "center",
@@ -491,5 +694,25 @@ const styles = StyleSheet.create({
   },
   lockIconLocked: {
     color: Colors.amber,
+  },
+  // ─── Empty card placeholder ────────────────────────────────
+  emptyCard: {
+    backgroundColor: "rgba(10, 14, 18, 0.85)",
+    borderWidth: 1,
+    borderColor: "rgba(42, 90, 106, 0.4)",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  emptyCardLabel: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "rgba(107, 132, 152, 0.8)",
+    letterSpacing: 1,
+  },
+  emptyCardHint: {
+    fontSize: 10,
+    color: "rgba(107, 132, 152, 0.5)",
+    marginTop: 2,
   },
 });
