@@ -31,8 +31,7 @@ import { useQuestPairing } from "../hooks/useQuestPairing";
 import { useBuildAdvisor } from "../hooks/useBuildAdvisor";
 import { useSkillTree } from "../hooks/useSkillTree";
 import { useDailyQuests } from "../hooks/useDailyQuests";
-// Menu detection ready for future use when OCR reliably detects game menus
-// import { useMenuDetection } from "../hooks/useMenuDetection";
+import { useMenuDetection } from "../hooks/useMenuDetection";
 import OverlayEventFeed from "./OverlayEventFeed";
 import OverlayActiveQuests from "./OverlayActiveQuests";
 import OverlaySquadLoadout from "./OverlaySquadLoadout";
@@ -125,7 +124,7 @@ export default function OverlayHUD() {
     myLoadout.buildClass, myLoadout.loadout, myLoadout.stats.survivability, !squad,
   );
   const dailyQuests = useDailyQuests();
-  // const { menuState } = useMenuDetection();
+  const { menuState } = useMenuDetection();
 
   // ─── Dynamic config from builder (via IPC or AsyncStorage) ─────
   const [sectionOrder, setSectionOrder] = useState<SectionId[]>(DEFAULT_SECTION_ORDER);
@@ -472,6 +471,8 @@ export default function OverlayHUD() {
           />
         );
       case "skillTreeContext":
+        // Only show when skill tree menu is detected via OCR
+        if (menuState !== "skill_tree") return null;
         return getAutoAdvice ? (
           <OverlaySkillTreeContext
             key={id}
