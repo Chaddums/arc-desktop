@@ -135,13 +135,13 @@ export function useStashOrganizer() {
     }
   }, []);
 
-  // Auto-run on mount
+  // Don't auto-run on mount — this is expensive (N×ardb API calls).
+  // Callers should invoke refresh() when needed (e.g., inventory menu detected).
   useEffect(() => {
-    analyze();
     return () => {
       abortRef.current = true;
     };
-  }, [analyze]);
+  }, []);
 
   const stats: StashStats = {
     keepCount: verdicts.filter((v) => v.verdict === "keep").length,

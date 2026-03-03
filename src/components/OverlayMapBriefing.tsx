@@ -25,6 +25,8 @@ interface Props {
   loadoutFitScore: number;
   expanded: boolean;
   onToggle: () => void;
+  headerColor?: string;
+  borderColor?: string;
 }
 
 function riskColor(score: number): string {
@@ -41,11 +43,13 @@ export default function OverlayMapBriefing({
   loadoutFitScore,
   expanded,
   onToggle,
+  headerColor,
+  borderColor,
 }: Props) {
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, borderColor ? { borderColor } : undefined]}>
       <TouchableOpacity onPress={onToggle} style={styles.header} activeOpacity={0.7}>
-        <Text style={styles.headerText}>
+        <Text style={[styles.headerText, headerColor ? { color: headerColor } : undefined]}>
           {expanded ? "\u25B4" : "\u25BE"} MAP BRIEFING
         </Text>
       </TouchableOpacity>

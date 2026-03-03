@@ -15,8 +15,12 @@ const {
 const { pathToFileURL } = require("url");
 const path = require("path");
 const fs = require("fs");
-// Disable GPU to prevent DXGI_ERROR_DEVICE_REMOVED crashes in games
-app.disableHardwareAcceleration();
+// GPU is required for transparent overlay windows on Windows.
+// Previous DXGI_ERROR_DEVICE_REMOVED crashes were caused by "screen-saver"
+// alwaysOnTop level, which has been replaced with "floating".
+// Add stability flags without fully disabling hardware acceleration.
+app.commandLine.appendSwitch("disable-gpu-sandbox");
+app.commandLine.appendSwitch("disable-software-rasterizer");
 
 const DEV = process.argv.includes("--dev");
 const DIST = path.join(__dirname, "..", "dist");
@@ -51,6 +55,7 @@ let currentMode = "main"; // "main" | "overlay"
 let serverUrl = `app://dist/index.html?v=${Date.now()}`;
 let gameDetector = null;
 let screenCapture = null;
+let boundsResyncInterval = null;
 
 // ─── Alert settings ─────────────────────────────────────────────
 let alertSettings = { notifyOnEvent: true, audioAlerts: true, audioVolume: 0.75 };
@@ -263,7 +268,23 @@ async function createOverlayWindow(url) {
       applyOverlayLockState();
       overlayWindow.webContents.send("overlay-lock-changed", overlayLocked);
       // Show once content is ready (toggleMode may have requested it before load)
-      if (currentMode === "overlay") overlayWindow.show();
+      if (currentMode === "overlay") {
+        overlayWindow.show();
+        console.log("[overlay] Window shown (ready-to-show)");
+      }
+    }
+  });
+
+  // Recover from GPU/render crashes — recreate the overlay instead of going blank
+  overlayWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[overlay] Render process gone:", details.reason);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.destroy();
+      overlayWindow = null;
+    }
+    if (currentMode === "overlay") {
+      console.log("[overlay] Recreating overlay after crash...");
+      createOverlayWindow(serverUrl);
     }
   });
 
@@ -275,6 +296,36 @@ async function createOverlayWindow(url) {
   overlayWindow.loadURL(url + separator + "overlay=1");
 }
 
+// ─── Overlay Bounds Re-sync ──────────────────────────────────────
+function startBoundsResync() {
+  stopBoundsResync();
+  boundsResyncInterval = setInterval(async () => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || currentMode !== "overlay") {
+      stopBoundsResync();
+      return;
+    }
+    const bounds = await getOverlayBounds();
+    const current = overlayWindow.getBounds();
+    // Only reposition if bounds actually changed (avoid flicker)
+    if (
+      current.x !== bounds.x ||
+      current.y !== bounds.y ||
+      current.width !== bounds.width ||
+      current.height !== bounds.height
+    ) {
+      console.log(`[overlay] Re-syncing bounds: ${bounds.x},${bounds.y} ${bounds.width}x${bounds.height}`);
+      overlayWindow.setBounds(bounds);
+    }
+  }, 5000);
+}
+
+function stopBoundsResync() {
+  if (boundsResyncInterval) {
+    clearInterval(boundsResyncInterval);
+    boundsResyncInterval = null;
+  }
+}
+
 // ─── Mode Toggle ────────────────────────────────────────────────
 async function toggleMode() {
   if (currentMode === "main") {
@@ -284,17 +335,23 @@ async function toggleMode() {
       mainWindow.minimize();
     }
     if (!overlayWindow || overlayWindow.isDestroyed()) {
+      console.log("[overlay] Creating overlay window...");
       await createOverlayWindow(serverUrl);
     } else {
       // Re-check game bounds and reposition before showing
       const bounds = await getOverlayBounds();
+      console.log(`[overlay] Repositioning to ${bounds.x},${bounds.y} ${bounds.width}x${bounds.height}`);
       overlayWindow.setBounds(bounds);
       overlayWindow.show();
     }
+    startBoundsResync();
   } else {
     currentMode = "main";
-    // Hide overlay first
+    stopBoundsResync();
+    console.log("[overlay] Switching to desktop mode");
+    // Exit edit mode before hiding overlay
     if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("overlay-exit-edit-mode");
       overlayWindow.hide();
     }
     if (!mainWindow || mainWindow.isDestroyed()) {
@@ -601,6 +658,14 @@ if (!gotLock) {
     }
   });
 
+// ─── GPU Process Crash Recovery ──────────────────────────────────
+app.on("child-process-gone", (_event, details) => {
+  if (details.type === "GPU") {
+    console.error("[gpu] GPU process gone:", details.reason);
+    // Overlay will auto-recover via render-process-gone handler
+  }
+});
+
 // ─── App Lifecycle ──────────────────────────────────────────────
 app.whenReady().then(() => {
   // protocol.handle is the modern API (Electron 25+)
@@ -662,6 +727,11 @@ app.whenReady().then(() => {
   // F9 = toggle overlay, Shift+F9 = toggle overlay lock
   globalShortcut.register("F9", toggleMode);
   globalShortcut.register("Shift+F9", () => setOverlayLock(!overlayLocked));
+  globalShortcut.register("F10", () => {
+    if (currentMode === "overlay" && overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("overlay-toggle-edit-mode");
+    }
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow(serverUrl);
@@ -670,6 +740,7 @@ app.whenReady().then(() => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  stopBoundsResync();
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy();
   if (gameDetector) gameDetector.stop();
   if (screenCapture) screenCapture.destroy();

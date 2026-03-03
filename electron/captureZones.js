@@ -45,6 +45,31 @@ const CAPTURE_ZONES = [
     width: 0.4,
     height: 0.1,
   },
+  // ─── Menu detection zones (Tier 2 context awareness) ──────
+  {
+    id: "menuHeaderTop",
+    label: "Menu Header (Top Center)",
+    x: 0.3,
+    y: 0.01,
+    width: 0.4,
+    height: 0.05,
+  },
+  {
+    id: "menuTitleLeft",
+    label: "Menu Title (Top Left)",
+    x: 0.02,
+    y: 0.02,
+    width: 0.25,
+    height: 0.06,
+  },
+  {
+    id: "menuHeaderBreadcrumb",
+    label: "Menu Breadcrumb (Upper Left)",
+    x: 0.02,
+    y: 0.08,
+    width: 0.3,
+    height: 0.04,
+  },
 ];
 
 module.exports = CAPTURE_ZONES;

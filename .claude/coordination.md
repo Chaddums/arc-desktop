@@ -2,7 +2,7 @@
 
 ## Session A
 - Status: active
-- Working on: Skill Tree Build Advisor (attribute-based scoring, dead perk detection, overlay panel)
+- Working on: Overlay visibility fixes (GPU compositing, section positioning, bounds re-sync)
 - Last check-in: 2026-03-02
 
 ## Session B

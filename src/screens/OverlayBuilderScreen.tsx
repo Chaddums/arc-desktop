@@ -43,6 +43,7 @@ const SCENES = [
 ];
 
 const SECTION_LABELS: Partial<Record<SectionId, { label: string; desc: string }>> = {
+  statusStrip: { label: "Status Bar", desc: "Loadout class, score & next event countdown" },
   eventFeed: { label: "Event Feed", desc: "Active & upcoming game events with countdowns" },
   activeQuests: { label: "Active Quests", desc: "Tracked quest progress from all traders" },
   squadLoadout: { label: "Squad Loadout", desc: "Teammate weapons, gear & online status" },

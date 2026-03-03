@@ -124,6 +124,20 @@ contextBridge.exposeInMainWorld("arcDesktop", {
     return () => ipcRenderer.removeListener("overlay-lock-changed", handler);
   },
 
+  /** Listen for overlay edit mode toggle (F10). Returns unsubscribe function. */
+  onOverlayEditModeToggle: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on("overlay-toggle-edit-mode", handler);
+    return () => ipcRenderer.removeListener("overlay-toggle-edit-mode", handler);
+  },
+
+  /** Listen for forced overlay edit mode exit (F9 while editing). Returns unsubscribe function. */
+  onOverlayExitEditMode: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on("overlay-exit-edit-mode", handler);
+    return () => ipcRenderer.removeListener("overlay-exit-edit-mode", handler);
+  },
+
   // ─── Overlay Config (Builder) ──────────────────────────────
 
   /** Set overlay anchor position */

@@ -37,7 +37,7 @@ function getWindowBounds(processName) {
     execFile(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-Command", script],
-      { windowsHide: true, timeout: 3000 },
+      { windowsHide: true, timeout: 8000 },
       (err, stdout) => {
         if (err) return resolve(null);
         const trimmed = (stdout || "").trim();

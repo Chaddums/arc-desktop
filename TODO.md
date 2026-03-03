@@ -45,6 +45,9 @@
 - [x] Window size presets (Default / Large / XL) in Settings
 - [x] TitleBar component with ARC/VIEW branding
 - [x] Configurable overlay panels — toggle which info strips are visible (OverlayBuilder + useOverlayConfig)
+- [x] Overlay config persistence — saved config loads on HUD mount, disabled sections filtered, position picker UX
+- [x] Frank mascot — taskbar/tray icon, Intel header
+- [x] Simplified dev launcher — arc_view.bat (no Metro server), app reset support
 
 ### P3 — Theming & Accessibility ✓
 - [x] Dual theme system (Clean sci-fi + Tactical gritty variant)
@@ -93,9 +96,9 @@
 
 ## Bugs
 
-- [ ] **Mouse cursor performance hit in main menu** — Severe mouse snapping/stuttering in the game main menu. Persists even after killing the app, but clears after screens go black and relaunch. May be an interaction with our overlay or a lingering process. Investigate what we're doing that could cause input lag even after exit.
-- [ ] **F9 overlay pips disappear** — When hitting F9 with in-game pips visible, they all vanish after a few seconds. Requires full app restart to get them back. Likely a timer or visibility state bug in the pip lifecycle.
-- [ ] **Game crashes (possible silent process)** — Frequent ARC Raiders crashes that weren't happening before. Last crash also killed arc-viewer and caused black screens. Suspect a behind-the-scenes process (screen capture? OCR polling?) is destabilizing the game. Previously investigated but not resolved.
+- [x] **Mouse cursor performance hit in main menu** — Fixed (persistent MediaStream replaced desktopCapturer polling)
+- [x] **F9 overlay pips disappear** — Fixed
+- [x] **Game crashes (possible silent process)** — Fixed
 
 ---
 

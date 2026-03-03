@@ -26,6 +26,7 @@ if (typeof document !== "undefined") {
       [data-preview-drag="locked"] { cursor: default !important; }
       [data-preview-drag="locked"] * { cursor: default !important; }
       [data-resize-handle] { cursor: nwse-resize !important; }
+      [data-resize-handle-left] { cursor: nesw-resize !important; }
       [data-snap-guide] {
         pointer-events: none;
       }
@@ -89,8 +90,6 @@ const SAMPLE = {
 };
 
 // ─── Game-resolution constants ──────────────────────────────────
-const STRIP_HEIGHT = 52;
-const STRIP_WIDTH_EST = 320;
 const CARD_HEIGHT_EST = 120;
 const SNAP_THRESHOLD = 20;
 const MIN_WIDTH = 280;
@@ -116,9 +115,12 @@ function getDefaultPositions(
   ch: number,
 ): Record<SectionId, SectionPosition> {
   const positions: Record<string, SectionPosition> = {};
-  let y = STRIP_HEIGHT + 4; // below compact HUD strip
+  const MARGIN = 6;
   const CARD_HEIGHT = 120;
   const CARD_GAP = 6;
+  const DEFAULT_COL_WIDTH = 0.2 * cw + CARD_GAP;
+  let y = MARGIN;
+  let col = 0;
   for (const cfg of sorted) {
     if (!cfg.enabled) continue;
     let pos: SectionPosition | null = null;
@@ -126,8 +128,16 @@ function getDefaultPositions(
       const dn = denormalize(cfg.position, cw, ch);
       if (dn.x >= 0 && dn.y >= 0) pos = dn;
     }
-    positions[cfg.id] = pos ?? { x: 0, y };
     const extra = cfg.id === "squadLoadout" ? 40 : 0;
+    if (!pos) {
+      // Wrap to next column if card would exceed screen height
+      if (y + CARD_HEIGHT + extra > ch - MARGIN) {
+        col++;
+        y = MARGIN;
+      }
+      pos = { x: MARGIN + col * DEFAULT_COL_WIDTH, y };
+    }
+    positions[cfg.id] = pos;
     y += CARD_HEIGHT + extra + CARD_GAP;
   }
   return positions as Record<SectionId, SectionPosition>;
@@ -190,11 +200,7 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
     setWidths(newWidths);
   }, [sectionConfigs, anchor, containerSize, gw, gh]);
 
-  // Strip position (top-level HUD bar)
-  const [stripPos, setStripPos] = useState<SectionPosition>({ x: 0, y: 0 });
-
-  // Drag state — supports both section IDs and "strip"
-  type DragId = SectionId | "strip";
+  type DragId = SectionId;
   const dragRef = useRef<{
     id: DragId;
     startX: number;
@@ -217,16 +223,12 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
   interface SnapGuide { axis: "x" | "y"; pos: number }
   const [snapGuides, setSnapGuides] = useState<SnapGuide[]>([]);
 
-  /** Get the bounding rect {x, y, w, h} of a card/strip by its id */
+  /** Get the bounding rect {x, y, w, h} of a card by its id */
   const getCardRect = useCallback((id: DragId, posOverride?: SectionPosition) => {
-    if (id === "strip") {
-      const p = posOverride ?? stripPos;
-      return { x: p.x, y: p.y, w: STRIP_WIDTH_EST, h: STRIP_HEIGHT };
-    }
     const p = posOverride ?? positions[id] ?? { x: 0, y: 0 };
     const w = widths[id] ?? DEFAULT_WIDTH;
     return { x: p.x, y: p.y, w, h: CARD_HEIGHT_EST };
-  }, [positions, stripPos, widths, DEFAULT_WIDTH]);
+  }, [positions, widths, DEFAULT_WIDTH]);
 
   /** Compute snap-adjusted position + guides for a dragged card.
    *  Stored in a ref so the drag useEffect doesn't re-subscribe on every position change. */
@@ -240,16 +242,9 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
     let snappedY = false;
 
     // Collect all other card rects
-    const otherIds: DragId[] = ["strip"];
+    const otherIds: DragId[] = [];
     for (const cfg of sorted) {
       if (cfg.enabled && cfg.id !== dragId) otherIds.push(cfg.id);
-    }
-    if (dragId === "strip") {
-      // strip dragging — compare against section cards only
-      otherIds.length = 0;
-      for (const cfg of sorted) {
-        if (cfg.enabled) otherIds.push(cfg.id);
-      }
     }
 
     for (const otherId of otherIds) {
@@ -296,12 +291,10 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
   };
 
   const handleMouseDown = useCallback((e: React.MouseEvent, id: DragId) => {
-    if (id !== "strip") {
-      const cfg = sectionConfigs.find((c) => c.id === id);
-      if (cfg?.locked) return;
-    }
+    const cfg = sectionConfigs.find((c) => c.id === id);
+    if (cfg?.locked) return;
     e.preventDefault();
-    const pos = id === "strip" ? stripPos : (positions[id] ?? { x: 0, y: 0 });
+    const pos = positions[id] ?? { x: 0, y: 0 };
     dragRef.current = {
       id,
       startX: e.clientX,
@@ -310,7 +303,7 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
       origY: pos.y,
     };
     setDraggingId(id);
-  }, [positions, stripPos, sectionConfigs]);
+  }, [positions, sectionConfigs]);
 
   // Store onSectionPositionChange in a ref to keep the effect stable
   const onPositionChangeRef = useRef(onSectionPositionChange);
@@ -329,11 +322,7 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
       const { snapped, guides } = computeSnapRef.current(id, rawPos);
       setSnapGuides(guides);
 
-      if (id === "strip") {
-        setStripPos(snapped);
-      } else {
-        setPositions((prev) => ({ ...prev, [id]: snapped }));
-      }
+      setPositions((prev) => ({ ...prev, [id]: snapped }));
     };
 
     const handleMouseUp = () => {
@@ -342,16 +331,14 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
         dragRef.current = null;
         setDraggingId(null);
         setSnapGuides([]);
-        // Persist normalized position for sections (normalize against game resolution)
-        if (id !== "strip") {
-          setPositions((prev) => {
-            const pos = prev[id];
-            if (pos && onPositionChangeRef.current) {
-              onPositionChangeRef.current(id as SectionId, normalize(pos, gwRef.current, ghRef.current));
-            }
-            return prev;
-          });
-        }
+        // Persist normalized position (normalize against game resolution)
+        setPositions((prev) => {
+          const pos = prev[id];
+          if (pos && onPositionChangeRef.current) {
+            onPositionChangeRef.current(id as SectionId, normalize(pos, gwRef.current, ghRef.current));
+          }
+          return prev;
+        });
       }
     };
 
@@ -368,39 +355,60 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
     id: DragId;
     startX: number;
     origWidth: number;
+    origX: number;
+    side: "right" | "left";
   } | null>(null);
   const [resizingId, setResizingId] = useState<DragId | null>(null);
 
-  const handleResizeDown = useCallback((e: React.MouseEvent, id: DragId) => {
+  const handleResizeDown = useCallback((e: React.MouseEvent, id: DragId, side: "right" | "left" = "right") => {
     e.preventDefault();
     e.stopPropagation();
     const currentWidth = widths[id] ?? DEFAULT_WIDTH;
-    resizeRef.current = { id, startX: e.clientX, origWidth: currentWidth };
+    const currentX = positions[id]?.x ?? 0;
+    resizeRef.current = { id, startX: e.clientX, origWidth: currentWidth, origX: currentX, side };
     setResizingId(id);
-  }, [widths, DEFAULT_WIDTH]);
+  }, [widths, DEFAULT_WIDTH, positions]);
 
   useEffect(() => {
     const handleResizeMove = (e: MouseEvent) => {
       if (!resizeRef.current) return;
-      const { id, startX, origWidth } = resizeRef.current;
+      const { id, startX, origWidth, origX, side } = resizeRef.current;
       // Mouse deltas are in screen pixels; divide by previewRatio to convert to game-res pixels
       const dx = (e.clientX - startX) / (scale * previewRatioRef.current);
-      const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, origWidth + dx));
-      setWidths((prev) => ({ ...prev, [id]: newWidth }));
+      if (side === "right") {
+        const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, origWidth + dx));
+        setWidths((prev) => ({ ...prev, [id]: newWidth }));
+      } else {
+        // Left handle: grow width leftward, shift position left
+        const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, origWidth - dx));
+        const newX = origX + (origWidth - newWidth);
+        setWidths((prev) => ({ ...prev, [id]: newWidth }));
+        setPositions((prev) => ({ ...prev, [id]: { x: newX, y: prev[id]?.y ?? 0 } }));
+      }
     };
 
     const handleResizeUp = () => {
       if (resizeRef.current) {
-        const { id } = resizeRef.current;
+        const { id, side } = resizeRef.current;
         resizeRef.current = null;
         setResizingId(null);
         // Persist normalized width (fraction of game resolution width)
-        if (id !== "strip" && onSectionWidthChange) {
+        if (onSectionWidthChange) {
           setWidths((prev) => {
             const w = prev[id];
             if (w != null) {
               const gameW = gwRef.current;
               onSectionWidthChange(id as SectionId, gameW > 0 ? w / gameW : w);
+            }
+            return prev;
+          });
+        }
+        // Persist position if left-side resize shifted it
+        if (side === "left" && onPositionChangeRef.current) {
+          setPositions((prev) => {
+            const pos = prev[id];
+            if (pos) {
+              onPositionChangeRef.current!(id as SectionId, normalize(pos, gwRef.current, ghRef.current));
             }
             return prev;
           });
@@ -425,6 +433,13 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
 
   // ─── Section preview data & labels ─────────────────────────
   const SECTION_PREVIEWS: Record<string, { label: string; rows: { left: string; right?: string; dot?: string; muted?: boolean; strikethrough?: boolean }[] }> = {
+    statusStrip: {
+      label: "STATUS",
+      rows: [
+        { left: "LOADOUT", right: `${SAMPLE.weapon}  ${SAMPLE.buildClass}  ${SAMPLE.score}` },
+        { left: "NEXT EVENT", right: SAMPLE.countdown },
+      ],
+    },
     eventFeed: {
       label: `EVENTS (6)`,
       rows: [
@@ -602,38 +617,10 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
           position: "relative",
         }}
       >
-        {/* HUD Strip — draggable + resizable */}
-        <div
-          data-preview-drag="section"
-          onMouseDown={(e) => handleMouseDown(e, "strip")}
-          style={{
-            position: "absolute",
-            left: stripPos.x,
-            top: stripPos.y,
-            opacity: draggingId === "strip" ? opacity * 0.8 : opacity,
-            transform: `scale(${scale})`,
-            transformOrigin: "top left",
-            width: "auto",
-            zIndex: draggingId === "strip" ? 100 : 2,
-            transition: draggingId === "strip" ? "none" : "box-shadow 0.15s",
-            boxShadow: draggingId === "strip" ? "0 4px 16px rgba(0,180,216,0.3)" : "none",
-          }}
-        >
-          <View style={[styles.strip, borderColor ? { borderColor } : undefined]}>
-            <Text style={styles.dragIcon}>{"\u2801"}</Text>
-            <Text style={styles.weaponName} numberOfLines={1}>{SAMPLE.weapon}</Text>
-            <Text style={[styles.buildTag, { color: Colors.red }]}>{SAMPLE.buildClass}</Text>
-            <Text style={[styles.scoreText, accentColor ? { color: accentColor } : undefined]}>{SAMPLE.score}</Text>
-            <View style={styles.separator} />
-            <Text style={styles.stripLabel}>NEXT</Text>
-            <Text style={[styles.stripValue, accentColor ? { color: accentColor } : undefined]}>{SAMPLE.countdown}</Text>
-          </View>
-        </div>
-
         {/* Draggable section cards */}
         {sorted.map((cfg) => {
           if (!cfg.enabled) return null;
-          const pos = positions[cfg.id] ?? { x: 0, y: STRIP_HEIGHT + 4 };
+          const pos = positions[cfg.id] ?? { x: 0, y: 0 };
           const isDragging = draggingId === cfg.id;
           return (
             <div
@@ -654,13 +641,20 @@ export default function OverlayPreview({ sectionConfigs, opacity, scale, anchor,
               }}
             >
               {renderSectionContent(cfg)}
-              {/* Resize handle */}
+              {/* Resize handles — bottom-left and bottom-right */}
               {!cfg.locked && (
-                <div
-                  data-resize-handle
-                  onMouseDown={(e) => handleResizeDown(e, cfg.id)}
-                  style={resizeHandleStyle}
-                />
+                <>
+                  <div
+                    data-resize-handle-left
+                    onMouseDown={(e) => handleResizeDown(e, cfg.id, "left")}
+                    style={resizeHandleLeftStyle}
+                  />
+                  <div
+                    data-resize-handle
+                    onMouseDown={(e) => handleResizeDown(e, cfg.id, "right")}
+                    style={resizeHandleStyle}
+                  />
+                </>
               )}
             </div>
           );
@@ -714,57 +708,18 @@ const resizeHandleStyle: React.CSSProperties = {
   borderBottomRightRadius: 6,
 };
 
+const resizeHandleLeftStyle: React.CSSProperties = {
+  position: "absolute",
+  left: 0,
+  bottom: 0,
+  width: 20,
+  height: 20,
+  cursor: "nesw-resize",
+  background: "linear-gradient(225deg, transparent 50%, rgba(0,180,216,0.4) 50%)",
+  borderBottomLeftRadius: 6,
+};
+
 const styles = StyleSheet.create({
-  // ─── HUD Strip (single compact row) ─────────────────────
-  strip: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(10, 14, 18, 0.92)",
-    borderWidth: 1,
-    borderColor: "rgba(42, 90, 106, 0.6)",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    height: 52,
-    gap: 8,
-  },
-  dragIcon: {
-    fontSize: 14,
-    color: "rgba(107, 132, 152, 0.5)",
-  },
-  separator: {
-    width: 1,
-    height: 28,
-    backgroundColor: "rgba(42, 90, 106, 0.4)",
-  },
-  weaponName: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: Colors.text,
-    maxWidth: 160,
-  },
-  buildTag: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-  },
-  scoreText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: Colors.accent,
-    fontFamily: fonts.mono,
-  },
-  stripLabel: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: "rgba(107, 132, 152, 0.7)",
-    letterSpacing: 0.8,
-  },
-  stripValue: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: Colors.accent,
-    fontFamily: fonts.mono,
-  },
   // ─── Sections ─────────────────────────────────────────────
   section: {
     backgroundColor: "rgba(10, 14, 18, 0.90)",

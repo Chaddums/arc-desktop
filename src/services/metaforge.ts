@@ -78,25 +78,37 @@ export async function fetchItems(page = 1): Promise<MetaForgeItem[]> {
   return data;
 }
 
+/** Inflight deduplication — concurrent callers share one fetch */
+let itemsInflight: Promise<MetaForgeItem[]> | null = null;
+
 /** Fetch all items across all pages */
 export async function fetchAllItems(): Promise<MetaForgeItem[]> {
   const key = "items_all";
   const cached = getCached<MetaForgeItem[]>(key);
   if (cached) return cached;
 
-  const allItems: MetaForgeItem[] = [];
-  let page = 1;
-  while (true) {
-    if (page > 1) await delay(500);
-    const items = await fetchItems(page);
-    if (!items || items.length === 0) break;
-    allItems.push(...items);
-    if (items.length < 50) break;
-    page++;
-  }
+  // Deduplicate: if another call is already fetching, piggyback on it
+  if (itemsInflight) return itemsInflight;
 
-  setCache(key, allItems);
-  return allItems;
+  itemsInflight = (async () => {
+    try {
+      const allItems: MetaForgeItem[] = [];
+      let page = 1;
+      while (true) {
+        const items = await fetchItems(page);
+        if (!items || items.length === 0) break;
+        allItems.push(...items);
+        if (items.length < 50) break;
+        page++;
+      }
+      setCache(key, allItems);
+      return allItems;
+    } finally {
+      itemsInflight = null;
+    }
+  })();
+
+  return itemsInflight;
 }
 
 /** Fetch traders with inventories */

@@ -130,6 +130,12 @@ interface ArcDesktopAPI {
   /** Listen for overlay lock state changes. Returns unsubscribe function. */
   onOverlayLockChanged: (cb: (locked: boolean) => void) => () => void;
 
+  /** Listen for overlay edit mode toggle (F10). Returns unsubscribe function. */
+  onOverlayEditModeToggle: (cb: () => void) => () => void;
+
+  /** Listen for forced overlay edit mode exit (F9 while editing). Returns unsubscribe function. */
+  onOverlayExitEditMode: (cb: () => void) => () => void;
+
   // ─── Overlay Drag ──────────────────────────────────────────────
 
   /** Start IPC-based overlay drag */

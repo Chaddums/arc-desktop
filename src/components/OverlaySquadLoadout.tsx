@@ -27,19 +27,19 @@ function formatGear(member: { weapon?: string; shield?: string; backpack?: strin
 }
 
 export default function OverlaySquadLoadout({ squad, expanded, onToggle, headerColor, borderColor }: Props) {
-  if (!squad || squad.members.length === 0) return null;
+  const memberCount = squad?.members.length ?? 0;
 
   return (
     <View style={[styles.container, borderColor ? { borderColor } : undefined]}>
       <TouchableOpacity onPress={onToggle} style={styles.header} activeOpacity={0.7}>
         <Text style={[styles.headerText, headerColor ? { color: headerColor } : undefined]}>
-          {expanded ? "\u25B4" : "\u25BE"} SQUAD ({squad.members.length})
+          {expanded ? "\u25B4" : "\u25BE"} SQUAD ({memberCount})
         </Text>
       </TouchableOpacity>
 
-      {expanded && (
+      {expanded && memberCount > 0 && (
         <View style={styles.body}>
-          {squad.members.map((member) => (
+          {squad!.members.map((member) => (
             <View key={member.accountId} style={styles.memberBlock}>
               <View style={styles.nameRow}>
                 <View

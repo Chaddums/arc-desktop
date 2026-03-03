@@ -8,7 +8,7 @@
  * Overlay mode: Renders OverlayHUD when ?overlay query param is present.
  */
 
-import React, { useState, useCallback } from "react";
+import React, { Component, useState, useCallback } from "react";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
@@ -29,6 +29,64 @@ import { Colors, breakpoints } from "./src/theme";
 import { ThemeProvider, useColors } from "./src/theme/ThemeContext";
 
 const Tab = createBottomTabNavigator();
+
+/** Error boundary so the overlay never silently unmounts */
+class OverlayErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error("[OverlayHUD crash]", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ position: "fixed", inset: 0, pointerEvents: "none" }}>
+          <div
+            style={{
+              position: "absolute",
+              left: 10,
+              top: 10,
+              background: "rgba(10,14,18,0.95)",
+              border: "1px solid rgba(230,126,34,0.8)",
+              borderRadius: 6,
+              padding: "8px 12px",
+              maxWidth: 400,
+              pointerEvents: "auto",
+            }}
+          >
+            <div style={{ color: "#e67e22", fontWeight: 700, fontSize: 11 }}>
+              OVERLAY ERROR
+            </div>
+            <div style={{ color: "#8fa4b0", fontSize: 10, marginTop: 4 }}>
+              {this.state.error.message}
+            </div>
+            <div
+              style={{
+                color: "#5a7a8a",
+                fontSize: 9,
+                marginTop: 4,
+                maxHeight: 80,
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {this.state.error.stack?.slice(0, 500)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const TAB_ICONS: Record<string, string> = {
   Intel: "\uD83D\uDCE1",
@@ -178,7 +236,12 @@ export default function App() {
   const isOverlay =
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).has("overlay");
-  if (isOverlay) return <OverlayHUD />;
+  if (isOverlay)
+    return (
+      <OverlayErrorBoundary>
+        <OverlayHUD />
+      </OverlayErrorBoundary>
+    );
 
   const isDesktop = Platform.OS === "web" && width >= breakpoints.desktop;
 

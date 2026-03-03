@@ -7,6 +7,7 @@ import React, { useState, useEffect } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import type { MapIntel } from "../hooks/useMapDetection";
 import { Colors } from "../theme";
+import { loc } from "../utils/loc";
 
 const THREAT_COLORS: Record<string, string> = {
   low: Colors.green,
@@ -93,7 +94,7 @@ export default function OverlayMapIntel({ intel, collapsed }: Props) {
                       ]}
                     />
                     <Text style={styles.enemyName} numberOfLines={1}>
-                      {enemy.name}
+                      {loc(enemy.name)}
                     </Text>
                     <Text style={[styles.threatLabel, { color: THREAT_COLORS[enemy.threat.toLowerCase()] ?? Colors.textSecondary }]}>
                       {enemy.threat}
@@ -119,7 +120,7 @@ export default function OverlayMapIntel({ intel, collapsed }: Props) {
                   <View key={quest.id} style={styles.questRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.questName} numberOfLines={1}>
-                        {quest.name}
+                        {loc(quest.name)}
                       </Text>
                       {quest.trader && (
                         <Text style={styles.questTrader}>{quest.trader}</Text>

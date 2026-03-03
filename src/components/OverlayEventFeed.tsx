@@ -14,6 +14,8 @@ interface Props {
   now: number;
   expanded: boolean;
   onToggle: () => void;
+  headerColor?: string;
+  borderColor?: string;
 }
 
 export default function OverlayEventFeed({
@@ -22,16 +24,16 @@ export default function OverlayEventFeed({
   now,
   expanded,
   onToggle,
+  headerColor,
+  borderColor,
 }: Props) {
   const totalCount = activeEvents.length + upcomingEvents.length;
-  if (totalCount === 0) return null;
-
   const upcoming = upcomingEvents.slice(0, 3);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, borderColor ? { borderColor } : undefined]}>
       <TouchableOpacity onPress={onToggle} style={styles.header} activeOpacity={0.7}>
-        <Text style={styles.headerText}>
+        <Text style={[styles.headerText, headerColor ? { color: headerColor } : undefined]}>
           {expanded ? "\u25B4" : "\u25BE"} EVENTS ({totalCount})
         </Text>
       </TouchableOpacity>

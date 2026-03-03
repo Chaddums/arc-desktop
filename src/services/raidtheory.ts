@@ -150,12 +150,10 @@ export async function fetchAllHideoutStations(): Promise<CraftingStation[]> {
     "workbench",
   ];
 
-  // Fetch stations sequentially to avoid rate limits
-  const stations: (CraftingStation | null)[] = [];
-  for (const id of stationIds) {
-    if (stations.length > 0) await delay(300);
-    stations.push(await fetchHideoutStation(id).catch(() => null));
-  }
+  // Fetch all stations in parallel (raw.githubusercontent.com has no rate limit)
+  const stations = await Promise.all(
+    stationIds.map((id) => fetchHideoutStation(id).catch(() => null)),
+  );
 
   const valid = stations.filter(Boolean) as CraftingStation[];
   setCache(key, valid);
@@ -187,11 +185,11 @@ export async function fetchAllQuests(): Promise<RaidTheoryQuest[]> {
 
   const jsonFiles = dirEntries.filter((e) => e.name.endsWith(".json"));
 
-  // Batch fetch with concurrency limit of 5 + delay between batches
+  // Batch fetch with concurrency limit of 10, minimal delay between batches
   const quests: RaidTheoryQuest[] = [];
-  for (let i = 0; i < jsonFiles.length; i += 5) {
-    if (i > 0) await delay(500);
-    const batch = jsonFiles.slice(i, i + 5);
+  for (let i = 0; i < jsonFiles.length; i += 10) {
+    if (i > 0) await delay(50);
+    const batch = jsonFiles.slice(i, i + 10);
     const results = await Promise.all(
       batch.map(async (file) => {
         try {

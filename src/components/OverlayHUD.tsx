@@ -5,7 +5,7 @@
  * Supports dynamic section ordering and HUD color overrides.
  */
 
-import React, { useEffect, useCallback, useState, useMemo } from "react";
+import React, { useEffect, useCallback, useState, useMemo, useRef } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEventTimer } from "../hooks/useEventTimer";
@@ -23,15 +23,16 @@ import { useRaidLog } from "../hooks/useRaidLog";
 import { useSquad } from "../hooks/useSquad";
 import { useOverlaySections } from "../hooks/useOverlaySections";
 import { useStashOrganizer } from "../hooks/useStashOrganizer";
-import { formatCountdown } from "../utils/format";
 import { loc } from "../utils/loc";
-import { Colors, fonts } from "../theme";
+import { Colors } from "../theme";
 import type { SectionId, SectionConfig, HudColorConfig } from "../hooks/useOverlayConfig";
+import { DEFAULT_SECTION_CONFIGS } from "../hooks/useOverlayConfig";
 import { useQuestPairing } from "../hooks/useQuestPairing";
 import { useBuildAdvisor } from "../hooks/useBuildAdvisor";
 import { useSkillTree } from "../hooks/useSkillTree";
 import { useDailyQuests } from "../hooks/useDailyQuests";
 import { useMenuDetection } from "../hooks/useMenuDetection";
+import OverlayStatusStrip from "./OverlayStatusStrip";
 import OverlayEventFeed from "./OverlayEventFeed";
 import OverlayActiveQuests from "./OverlayActiveQuests";
 import OverlaySquadLoadout from "./OverlaySquadLoadout";
@@ -53,15 +54,8 @@ import OverlayMapPip from "./OverlayMapPip";
 import OverlayStashPip from "./OverlayStashPip";
 import OverlayEventToast from "./OverlayEventToast";
 
-// ─── Build class badge colors ──────────────────────────────────
-const BUILD_CLASS_COLORS: Record<string, string> = {
-  DPS: Colors.red,
-  Tank: Colors.accent,
-  Support: Colors.green,
-  Hybrid: Colors.amber,
-};
-
 const SECTION_LABELS: Record<SectionId, string> = {
+  statusStrip: "STATUS BAR",
   eventFeed: "EVENT FEED",
   activeQuests: "ACTIVE QUESTS",
   squadLoadout: "SQUAD LOADOUT",
@@ -78,6 +72,7 @@ const SECTION_LABELS: Record<SectionId, string> = {
 };
 
 const DEFAULT_SECTION_ORDER: SectionId[] = [
+  "statusStrip",
   "eventFeed",
   "activeQuests",
   "squadLoadout",
@@ -107,6 +102,14 @@ export default function OverlayHUD() {
   const [locked, setLocked] = useState(false);
   const stashOrganizer = useStashOrganizer();
 
+  // ─── Edit mode state (F10 in-overlay card positioning) ──────
+  const [editMode, setEditMode] = useState(false);
+  const [editPositions, setEditPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const editDragRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const editPositionsRef = useRef(editPositions);
+  editPositionsRef.current = editPositions;
+
   // ─── New hooks ─────────────────────────────────────────────────
   const { items } = useItemBrowser();
   const myLoadout = useMyLoadout(items);
@@ -125,6 +128,15 @@ export default function OverlayHUD() {
   );
   const dailyQuests = useDailyQuests();
   const { menuState } = useMenuDetection();
+
+  // Lazy-load stash analysis only when inventory/stash menu detected
+  const stashAnalyzedRef = React.useRef(false);
+  useEffect(() => {
+    if (!stashAnalyzedRef.current && (menuState === "inventory" || menuState === "stash")) {
+      stashAnalyzedRef.current = true;
+      stashOrganizer.refresh();
+    }
+  }, [menuState]);
 
   // ─── Dynamic config from builder (via IPC or AsyncStorage) ─────
   const [sectionOrder, setSectionOrder] = useState<SectionId[]>(DEFAULT_SECTION_ORDER);
@@ -152,14 +164,32 @@ export default function OverlayHUD() {
         if (!raw) return;
         const saved = JSON.parse(raw);
         if (saved.sectionConfigs) {
-          // Migrate: add any new section IDs missing from saved configs
+          // Migrate: add new sections + backfill missing position/width from defaults
           const savedIds = new Set(saved.sectionConfigs.map((c: SectionConfig) => c.id));
           const maxOrder = Math.max(...saved.sectionConfigs.map((c: SectionConfig) => c.order), -1);
           let nextOrder = maxOrder + 1;
+          let needsPersist = false;
           for (const id of DEFAULT_SECTION_ORDER) {
             if (!savedIds.has(id)) {
-              saved.sectionConfigs.push({ id, enabled: true, order: nextOrder++, locked: false });
+              const def = DEFAULT_SECTION_CONFIGS.find((d) => d.id === id);
+              saved.sectionConfigs.push(def ? { ...def, order: nextOrder++ } : { id, enabled: true, order: nextOrder++, locked: false });
+              needsPersist = true;
             }
+          }
+          // Backfill position/width for existing entries that lack them
+          saved.sectionConfigs = saved.sectionConfigs.map((cfg: SectionConfig) => {
+            if (!cfg.position) {
+              const def = DEFAULT_SECTION_CONFIGS.find((d) => d.id === cfg.id);
+              if (def?.position) {
+                needsPersist = true;
+                return { ...cfg, position: def.position, width: cfg.width ?? def.width };
+              }
+            }
+            return cfg;
+          });
+          // Persist migration so builder picks up the same data on next load
+          if (needsPersist) {
+            await AsyncStorage.setItem("@arcview/overlay-config", JSON.stringify(saved));
           }
           applySectionConfigs(saved.sectionConfigs);
         }
@@ -243,8 +273,10 @@ export default function OverlayHUD() {
   }, [mapRec.selectedMap, myLoadout.equippedItems, raidLog.entries, bots, activeEvents]);
 
   // ─── Positioned sections (denormalize 0-1 → screen pixels) ────
-  const STRIP_HEIGHT = 52;
+  const STRIP_HEIGHT = 10; // top margin for flow-layout fallback
   const DEFAULT_CARD_FRAC = 0.2; // default card width as fraction of screen
+  const EDGE_MARGIN = 6; // px inset from screen edges
+  const CARD_HEIGHT_EST = 140; // estimated card height for bottom-edge clamping
 
   // Split sections into positioned (have saved builder positions) vs flow (stack in column)
   const { positionedSections, flowSections } = useMemo(() => {
@@ -264,9 +296,14 @@ export default function OverlayHUD() {
 
       if (cfg?.position && cfg.position.x <= 1 && cfg.position.y <= 1) {
         // Has a saved position from builder → absolute position
+        // Clamp so cards never bleed past screen edges
+        const rawX = cfg.position.x * sw;
+        const rawY = cfg.position.y * sh;
+        const x = Math.max(EDGE_MARGIN, Math.min(rawX, sw - width - EDGE_MARGIN));
+        const y = Math.max(EDGE_MARGIN, Math.min(rawY, sh - CARD_HEIGHT_EST - EDGE_MARGIN));
         positioned.push({
           id,
-          position: { x: cfg.position.x * sw, y: cfg.position.y * sh },
+          position: { x, y },
           width,
         });
       } else {
@@ -285,38 +322,115 @@ export default function OverlayHUD() {
   }, []);
 
   useEffect(() => {
-    if (!locked) {
+    if (!locked && !editMode) {
       window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
     }
-  }, [locked]);
+  }, [locked, editMode]);
+
+  // ─── Edit mode IPC listeners ──────────────────────────────────
+  const exitEditMode = useCallback(() => {
+    setEditMode(false);
+    setDraggingId(null);
+    editDragRef.current = null;
+    window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
+  }, []);
+
+  useEffect(() => {
+    const unsubToggle = window.arcDesktop?.onOverlayEditModeToggle(() => {
+      setEditMode((prev) => {
+        const next = !prev;
+        if (next) {
+          window.arcDesktop?.setIgnoreMouseEvents(false);
+        } else {
+          editDragRef.current = null;
+          window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
+        }
+        return next;
+      });
+      // Clear drag state outside the updater
+      setDraggingId(null);
+    });
+    const unsubExit = window.arcDesktop?.onOverlayExitEditMode(() => {
+      exitEditMode();
+    });
+    return () => {
+      unsubToggle?.();
+      unsubExit?.();
+    };
+  }, [exitEditMode]);
+
+  // ─── Edit mode drag system ───────────────────────────────────
+  const handleEditDragStart = useCallback((e: React.MouseEvent, id: string, currentX: number, currentY: number) => {
+    e.preventDefault();
+    editDragRef.current = { id, startX: e.clientX, startY: e.clientY, origX: currentX, origY: currentY };
+    setDraggingId(id);
+  }, []);
+
+  useEffect(() => {
+    if (!editMode) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const drag = editDragRef.current;
+      if (!drag) return;
+      const sw = window.innerWidth;
+      const sh = window.innerHeight;
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+      const x = Math.max(EDGE_MARGIN, Math.min(drag.origX + dx, sw - EDGE_MARGIN - 100));
+      const y = Math.max(EDGE_MARGIN, Math.min(drag.origY + dy, sh - EDGE_MARGIN - 40));
+      setEditPositions((prev) => ({ ...prev, [drag.id]: { x, y } }));
+    };
+
+    const handleMouseUp = async () => {
+      const drag = editDragRef.current;
+      if (!drag) return;
+      editDragRef.current = null;
+      setDraggingId(null);
+
+      // Read latest position from ref (avoids stale closure)
+      const pos = editPositionsRef.current[drag.id];
+      if (!pos) return;
+
+      // Normalize to 0-1 and save to AsyncStorage
+      const sw = window.innerWidth;
+      const sh = window.innerHeight;
+      const normX = pos.x / sw;
+      const normY = pos.y / sh;
+
+      try {
+        const raw = await AsyncStorage.getItem("@arcview/overlay-config");
+        if (raw) {
+          const cfg = JSON.parse(raw);
+          if (cfg.sectionConfigs) {
+            cfg.sectionConfigs = cfg.sectionConfigs.map((sc: any) =>
+              sc.id === drag.id ? { ...sc, position: { x: normX, y: normY } } : sc,
+            );
+            await AsyncStorage.setItem("@arcview/overlay-config", JSON.stringify(cfg));
+            // Update local savedConfigs so the card stays in place
+            setSavedConfigs(cfg.sectionConfigs);
+          }
+        }
+      } catch {}
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [editMode]);
 
   // ─── Mouse event handlers ─────────────────────────────────────
   const handleMouseEnter = useCallback(() => {
-    if (locked) return;
+    if (locked || editMode) return;
     window.arcDesktop?.setIgnoreMouseEvents(false);
-  }, [locked]);
+  }, [locked, editMode]);
 
   const handleMouseLeave = useCallback(() => {
-    if (locked) return;
+    if (locked || editMode) return;
     window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
-  }, [locked]);
-
-  const handleLockMouseEnter = useCallback(() => {
-    window.arcDesktop?.setIgnoreMouseEvents(false);
-  }, []);
-
-  const handleLockMouseLeave = useCallback(() => {
-    window.arcDesktop?.setIgnoreMouseEvents(true, { forward: true });
-  }, []);
-
-  // ─── Border style ─────────────────────────────────────────────
-  const borderStyle = isImminent
-    ? styles.stripImminent
-    : hasActive
-    ? styles.stripActive
-    : null;
-
-  const buildClassColor = BUILD_CLASS_COLORS[myLoadout.buildClass] ?? Colors.textMuted;
+  }, [locked, editMode]);
 
   // ─── HUD color overrides ──────────────────────────────────────
   const accentOverride = hudColors?.accentColor;
@@ -326,6 +440,20 @@ export default function OverlayHUD() {
   // ─── Section renderer (dynamic order, crash-isolated) ──────────
   const renderSectionInner = (id: SectionId) => {
     switch (id) {
+      case "statusStrip":
+        return (
+          <OverlayStatusStrip
+            key={id}
+            weaponName={weaponName}
+            buildClass={myLoadout.buildClass}
+            overallScore={myLoadout.stats.overallScore}
+            countdown={countdown}
+            isImminent={isImminent}
+            hasActive={hasActive}
+            headerColor={headerOverride}
+            borderColor={borderOverride}
+          />
+        );
       case "eventFeed":
         return (
           <OverlayEventFeed
@@ -503,101 +631,78 @@ export default function OverlayHUD() {
   };
 
   return (
-    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", opacity: hudOpacity }}>
-      {/* ─── HUD Strip (always visible, top-left) ────────── */}
-      <div
-        style={{
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", opacity: hudOpacity, overflow: "hidden" }}>
+      {/* ─── Edit Mode Banner ────────────────────────────── */}
+      {editMode && (
+        <div style={{
           position: "absolute",
-          left: 10,
-          top: 10,
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 32,
+          backgroundColor: "rgba(230, 126, 34, 0.9)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           pointerEvents: "auto",
-          ...(isImminent ? imminentPulseStyle : hasActive ? sheenStyle : undefined),
-        }}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
-          <View style={[
-            styles.strip,
-            borderStyle,
-            borderOverride ? { borderColor: borderOverride } : undefined,
-          ]}>
-            {/* Loadout badge */}
-            {weaponName ? (
-              <View style={styles.segment}>
-                <Text style={styles.weaponName} numberOfLines={1}>
-                  {weaponName}
-                </Text>
-                <View style={styles.buildRow}>
-                  <Text style={[styles.buildTag, { color: buildClassColor }]}>
-                    {myLoadout.buildClass}
-                  </Text>
-                  <Text style={[
-                    styles.scoreText,
-                    accentOverride ? { color: accentOverride } : undefined,
-                  ]}>
-                    {myLoadout.stats.overallScore}
-                  </Text>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.segment}>
-                <Text style={styles.segmentLabel}>LOADOUT</Text>
-                <Text style={styles.segmentValueDim}>--</Text>
-              </View>
-            )}
-
-            <View style={styles.separator} />
-
-            {/* Next event countdown */}
-            <View style={styles.segment}>
-              <Text style={styles.segmentLabel}>NEXT</Text>
-              <Text style={[
-                styles.segmentValue,
-                isImminent && styles.segmentValueImminent,
-                accentOverride && !isImminent ? { color: accentOverride } : undefined,
-              ]}>
-                {countdown != null && countdown > 0
-                  ? formatCountdown(countdown)
-                  : activeEvents.length > 0
-                  ? "NOW"
-                  : "--:--"}
-              </Text>
-            </View>
-
-            {/* Lock toggle button */}
-            <View style={styles.separator} />
-            <div
-              style={{ WebkitAppRegion: "no-drag", cursor: "pointer", padding: "4px 10px" } as React.CSSProperties}
-              onClick={() => window.arcDesktop?.setOverlayLocked(!locked)}
-              onMouseEnter={handleLockMouseEnter}
-              onMouseLeave={handleLockMouseLeave}
-              title={locked ? "Unlock overlay (Shift+F9)" : "Lock overlay (Shift+F9)"}
-            >
-              <Text style={[styles.lockIcon, locked && styles.lockIconLocked]}>
-                {locked ? "\uD83D\uDD12" : "\uD83D\uDD13"}
-              </Text>
-            </div>
-          </View>
+          zIndex: 9999,
+        }}>
+          <span style={{
+            color: "#fff",
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: 2,
+            fontFamily: "monospace",
+          }}>
+            EDIT MODE — DRAG CARDS — PRESS F10 TO LOCK
+          </span>
         </div>
+      )}
 
       {/* ─── Positioned section cards (have builder-saved positions) ── */}
       {positionedSections.map(({ id, position, width }) => {
         const content = renderSection(id);
+        const editPos = editPositions[id];
+        const effectiveX = editPos ? editPos.x : position.x;
+        const effectiveY = editPos ? editPos.y : position.y;
+        const isDragging = draggingId === id;
         return (
           <div
             key={id}
             style={{
               position: "absolute",
-              left: position.x,
-              top: position.y,
+              left: effectiveX,
+              top: effectiveY,
               width,
               pointerEvents: "auto",
               transform: hudScale !== 1 ? `scale(${hudScale})` : undefined,
               transformOrigin: "top left",
+              ...(editMode ? {
+                outline: isDragging ? "2px solid rgba(230, 126, 34, 0.9)" : "1px dashed rgba(230, 126, 34, 0.6)",
+                cursor: isDragging ? "grabbing" : "grab",
+                boxShadow: isDragging ? "0 0 16px rgba(230, 126, 34, 0.4)" : undefined,
+                userSelect: "none" as const,
+              } : undefined),
             }}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
+            onMouseEnter={editMode ? undefined : handleMouseEnter}
+            onMouseLeave={editMode ? undefined : handleMouseLeave}
+            onMouseDown={editMode ? (e) => handleEditDragStart(e, id, effectiveX, effectiveY) : undefined}
           >
+            {editMode && (
+              <div style={{
+                position: "absolute",
+                top: -18,
+                left: 0,
+                fontSize: 9,
+                fontWeight: 700,
+                color: "rgba(230, 126, 34, 0.9)",
+                letterSpacing: 1,
+                fontFamily: "monospace",
+                pointerEvents: "none",
+              }}>
+                ⣿ {SECTION_LABELS[id]}
+              </div>
+            )}
             {content || (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyCardLabel}>{SECTION_LABELS[id]}</Text>
@@ -680,119 +785,8 @@ export default function OverlayHUD() {
   );
 }
 
-// ─── CSS animations + corner bracket decoration ───────────────────
-const sheenStyle: React.CSSProperties = {
-  overflow: "hidden",
-};
-
-const imminentPulseStyle: React.CSSProperties = {
-  overflow: "hidden",
-  animation: "overlayPulse 2s ease-in-out infinite",
-};
-
-// Inject overlay keyframes + corner bracket styles
-if (typeof document !== "undefined") {
-  const styleId = "overlay-hud-keyframes";
-  if (!document.getElementById(styleId)) {
-    const style = document.createElement("style");
-    style.id = styleId;
-    style.textContent = `
-      @keyframes overlayPulse {
-        0%, 100% { filter: brightness(1); }
-        50% { filter: brightness(1.15); }
-      }
-      @keyframes overlaySheen {
-        0% { transform: translateX(-100%); }
-        100% { transform: translateX(200%); }
-      }
-    `;
-    document.head.appendChild(style);
-  }
-}
 
 const styles = StyleSheet.create({
-  strip: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(10, 14, 18, 0.92)",
-    borderWidth: 1,
-    borderColor: "rgba(42, 90, 106, 0.6)",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    height: 52,
-  },
-  stripActive: {
-    borderColor: "rgba(0, 180, 216, 0.7)",
-  },
-  stripImminent: {
-    borderColor: "rgba(230, 126, 34, 0.8)",
-    borderWidth: 2,
-  },
-  segment: {
-    alignItems: "center",
-    paddingHorizontal: 10,
-  },
-  segmentLabel: {
-    fontSize: 8,
-    fontWeight: "700",
-    color: "rgba(107, 132, 152, 0.8)",
-    letterSpacing: 1,
-  },
-  segmentValue: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: Colors.accent,
-    fontFamily: fonts.mono,
-    fontVariant: ["tabular-nums"],
-    marginTop: 1,
-  },
-  segmentValueDim: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: Colors.textMuted,
-    marginTop: 1,
-  },
-  segmentValueImminent: {
-    color: Colors.amber,
-  },
-  separator: {
-    width: 1,
-    height: 28,
-    backgroundColor: "rgba(42, 90, 106, 0.4)",
-  },
-  // ─── Loadout badge ────────────────────────────────────────────
-  weaponName: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: Colors.text,
-    maxWidth: 100,
-  },
-  buildRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    marginTop: 1,
-  },
-  buildTag: {
-    fontSize: 8,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  scoreText: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: Colors.accent,
-    fontFamily: fonts.mono,
-    fontVariant: ["tabular-nums"],
-  },
-  lockIcon: {
-    fontSize: 14,
-    color: "rgba(107, 132, 152, 0.6)",
-  },
-  lockIconLocked: {
-    color: Colors.amber,
-  },
   // ─── Empty card placeholder ────────────────────────────────
   emptyCard: {
     backgroundColor: "rgba(10, 14, 18, 0.85)",

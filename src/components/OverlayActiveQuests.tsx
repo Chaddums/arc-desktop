@@ -6,12 +6,15 @@ import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import type { RaidTheoryQuest } from "../types";
 import { Colors } from "../theme";
+import { loc } from "../utils/loc";
 
 interface Props {
   quests: RaidTheoryQuest[];
   completedIds: Set<string>;
   expanded: boolean;
   onToggle: () => void;
+  headerColor?: string;
+  borderColor?: string;
 }
 
 export default function OverlayActiveQuests({
@@ -19,14 +22,15 @@ export default function OverlayActiveQuests({
   completedIds,
   expanded,
   onToggle,
+  headerColor,
+  borderColor,
 }: Props) {
   const active = quests.filter((q) => !completedIds.has(q.id)).slice(0, 3);
-  if (active.length === 0) return null;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, borderColor ? { borderColor } : undefined]}>
       <TouchableOpacity onPress={onToggle} style={styles.header} activeOpacity={0.7}>
-        <Text style={styles.headerText}>
+        <Text style={[styles.headerText, headerColor ? { color: headerColor } : undefined]}>
           {expanded ? "\u25B4" : "\u25BE"} QUESTS ({active.length})
         </Text>
       </TouchableOpacity>
@@ -37,11 +41,11 @@ export default function OverlayActiveQuests({
             <View key={quest.id} style={styles.row}>
               <View style={styles.textCol}>
                 <Text style={styles.questName} numberOfLines={1}>
-                  {quest.name.en}
+                  {loc(quest.name)}
                 </Text>
                 {quest.objectives && quest.objectives[0] && (
                   <Text style={styles.objective} numberOfLines={1}>
-                    {quest.objectives[0]}
+                    {loc(quest.objectives[0])}
                   </Text>
                 )}
               </View>

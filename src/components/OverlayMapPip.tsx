@@ -11,6 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { MapIntel } from "../hooks/useMapDetection";
 import { formatCountdown } from "../utils/format";
 import { Colors } from "../theme";
+import { loc } from "../utils/loc";
 
 const PIP_MODE_KEY = "@arcview/pip_mode";
 
@@ -191,7 +192,7 @@ export default function OverlayMapPip({ intel, onVisibilityChange }: Props) {
             {top3Enemies.map((enemy, i) => (
               <View key={i} style={styles.enemyRow}>
                 <Text style={styles.enemyName} numberOfLines={1}>
-                  {enemy.name}
+                  {loc(enemy.name)}
                 </Text>
                 <Text style={[styles.threatTag, { color: THREAT_COLORS[enemy.threat.toLowerCase()] ?? Colors.textSecondary }]}>
                   ({enemy.threat.toLowerCase()})
@@ -214,7 +215,7 @@ export default function OverlayMapPip({ intel, onVisibilityChange }: Props) {
             {top3Quests.map((quest) => (
               <View key={quest.id} style={styles.questRow}>
                 <Text style={styles.questName} numberOfLines={1}>
-                  {quest.name}
+                  {loc(quest.name)}
                 </Text>
                 {quest.trader && (
                   <Text style={styles.questTrader}>({quest.trader})</Text>
