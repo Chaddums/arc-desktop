@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Colors } from "../theme";
+import { getWebhookUrl } from "../services/discord";
 
 export type ReportType = "bug" | "feedback" | "feature";
 
@@ -21,7 +22,6 @@ interface ReportModalProps {
   visible: boolean;
   type: ReportType;
   onClose: () => void;
-  webhookUrl?: string;
 }
 
 const CONFIG: Record<ReportType, { title: string; titlePlaceholder: string; bodyLabel: string; bodyPlaceholder: string; hint: string; submitLabel: string }> = {
@@ -61,7 +61,7 @@ function getSystemInfo(): string {
   return lines.join("\n");
 }
 
-export default function ReportModal({ visible, type, onClose, webhookUrl }: ReportModalProps) {
+export default function ReportModal({ visible, type, onClose }: ReportModalProps) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -82,6 +82,7 @@ export default function ReportModal({ visible, type, onClose, webhookUrl }: Repo
     setSending(true);
     setStatus(null);
 
+    const webhookUrl = getWebhookUrl(type);
     const payload = {
       embeds: [{
         title: `[${config.title}] ${title}`,
@@ -113,14 +114,13 @@ export default function ReportModal({ visible, type, onClose, webhookUrl }: Repo
         copyFallback(title, body, type);
       }
     } else {
-      // No webhook configured — copy to clipboard
       copyFallback(title, body, type);
       setStatus("Copied to clipboard! Send to our Discord.");
       setTimeout(handleClose, 2000);
     }
 
     setSending(false);
-  }, [title, body, type, config.title, webhookUrl, handleClose]);
+  }, [title, body, type, config.title, handleClose]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>

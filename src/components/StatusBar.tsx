@@ -8,8 +8,6 @@ import { View, Text, TouchableOpacity, StyleSheet, Linking } from "react-native"
 import { Colors } from "../theme";
 import ReportModal, { ReportType } from "./ReportModal";
 
-const DISCORD_WEBHOOK_URL = ""; // Configure when Discord webhook is set up
-
 export default function StatusBar() {
   const [modalType, setModalType] = useState<ReportType | null>(null);
 
@@ -54,7 +52,6 @@ export default function StatusBar() {
         visible={modalType !== null}
         type={modalType ?? "bug"}
         onClose={() => setModalType(null)}
-        webhookUrl={DISCORD_WEBHOOK_URL || undefined}
       />
     </>
   );

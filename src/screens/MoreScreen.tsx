@@ -517,6 +517,35 @@ export default function MoreScreen() {
               </View>
             </Panel>
 
+            {/* Alerts (mobile) */}
+            {!isDesktop && (
+              <Panel style={styles.sectionBody}>
+                <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Notifications</Text>
+                <View style={styles.toggleRow}>
+                  <Text style={[styles.toggleLabel, { color: C.text }]}>Event Alerts</Text>
+                  <Toggle value={alertSettings.notifyOnEvent} onToggle={() => updateAlertSettings({ notifyOnEvent: !alertSettings.notifyOnEvent })} size="small" />
+                </View>
+                <Divider />
+                <Text style={[styles.fieldLabel, { color: C.textSecondary }]}>Audio</Text>
+                <View style={styles.toggleRow}>
+                  <Text style={[styles.toggleLabel, { color: C.text }]}>Sound Effects</Text>
+                  <Toggle value={alertSettings.audioAlerts} onToggle={() => updateAlertSettings({ audioAlerts: !alertSettings.audioAlerts })} size="small" />
+                </View>
+                <View style={[styles.pillRow, !alertSettings.audioAlerts && { opacity: 0.4 }]}>
+                  {[0.25, 0.5, 0.75, 1.0].map((vol) => (
+                    <TouchableOpacity
+                      key={vol}
+                      style={[styles.pill, { borderColor: C.border }, alertSettings.audioVolume === vol && { borderColor: C.accent, backgroundColor: C.accentBg }]}
+                      onPress={() => updateAlertSettings({ audioVolume: vol })}
+                      disabled={!alertSettings.audioAlerts}
+                    >
+                      <Text style={[styles.pillText, { color: C.textSecondary }, alertSettings.audioVolume === vol && { color: C.accent }]}>{Math.round(vol * 100)}%</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </Panel>
+            )}
+
             {/* Desktop-only: Notifications + OCR */}
             {isDesktop && (
               <>
