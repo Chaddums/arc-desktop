@@ -1,7 +1,7 @@
 {
-  "name": "arc-view",
+  "name": "arc-overlay",
   "version": "0.1.0",
-  "description": "Arc Raiders companion — events, quests, crafting",
+  "description": "ARC Overlay — desktop overlay for Arc Raiders",
   "main": "index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
