@@ -26,7 +26,10 @@ const DEV = process.argv.includes("--dev");
 const DIST = path.join(__dirname, "..", "dist");
 const GEOMETRY_FILE = path.join(app.getPath("userData"), "window-geometry.json");
 const OVERLAY_SETTINGS_FILE = path.join(app.getPath("userData"), "overlay-settings.json");
+const PROFILE_FILE = path.join(app.getPath("userData"), "player-profile.json");
 const ocrDebugLog = require("./ocrDebugLog");
+const { PlayerProfile } = require("./playerProfile");
+const GameFileWatcher = require("./gameFileWatcher");
 
 // ─── Window Geometry Persistence ─────────────────────────────────
 function loadGeometry() {
@@ -56,6 +59,8 @@ let serverUrl = `app://dist/index.html?v=${Date.now()}`;
 let gameDetector = null;
 let screenCapture = null;
 let boundsResyncInterval = null;
+let playerProfile = null;
+let gameFileWatcher = null;
 
 // ─── Alert settings ─────────────────────────────────────────────
 let alertSettings = { notifyOnEvent: true, audioAlerts: true, audioVolume: 0.75 };
@@ -624,6 +629,45 @@ ipcMain.handle("get-ocr-log-path", () => {
   return ocrDebugLog.getLogPath();
 });
 
+// ─── Player Profile IPC ─────────────────────────────────────────
+
+ipcMain.on("profile-record-item", (_event, itemName, quantity) => {
+  if (playerProfile) playerProfile.recordItemPickup(itemName, quantity);
+});
+
+ipcMain.on("profile-record-objective", (_event, text, type, progress) => {
+  if (!playerProfile) return;
+  if (type === "complete") {
+    playerProfile.recordObjectiveComplete(text);
+  } else if (type === "progress" && progress) {
+    playerProfile.recordQuestProgress(text, progress.current, progress.total);
+  } else {
+    playerProfile.recordObjectiveComplete(text);
+  }
+});
+
+ipcMain.handle("get-player-profile", () => {
+  if (!playerProfile) return null;
+  return playerProfile.getSummary();
+});
+
+ipcMain.on("profile-start-session", () => {
+  if (playerProfile) playerProfile.startSession();
+});
+
+ipcMain.on("profile-end-session", () => {
+  if (playerProfile) playerProfile.endSession();
+});
+
+ipcMain.handle("get-game-resolution", () => {
+  if (!gameFileWatcher) return null;
+  return gameFileWatcher.getLastData("resolution") || null;
+});
+
+ipcMain.on("rescan-game-files", () => {
+  if (gameFileWatcher) gameFileWatcher.rescan();
+});
+
 // ─── App Reset ──────────────────────────────────────────────────
 ipcMain.handle("reset-app", async () => {
   const userData = app.getPath("userData");
@@ -702,6 +746,33 @@ app.whenReady().then(() => {
     // screenCapture deps not available
   }
 
+  // Player profile (persistent local tracking)
+  try {
+    playerProfile = new PlayerProfile(PROFILE_FILE);
+    console.log("[profile] Loaded player profile from", PROFILE_FILE);
+  } catch (err) {
+    console.error("[profile] Failed to init:", err.message);
+  }
+
+  // Game file watcher (GVAS save files, game settings)
+  try {
+    gameFileWatcher = new GameFileWatcher(({ type, data }) => {
+      // Forward to renderer
+      broadcast("game-file-update", { type, data });
+
+      // Update player profile with game data
+      if (playerProfile && type === "recipeTracker" && data) {
+        playerProfile.updateRecipes(data.recipes || []);
+      }
+      if (playerProfile && type === "options" && data && data.settings) {
+        playerProfile.updateGameSettings(data.settings);
+      }
+    });
+    gameFileWatcher.start();
+  } catch (err) {
+    console.error("[gameFiles] Failed to init:", err.message);
+  }
+
   // Game detection (lazy-loaded)
   try {
     const GameDetector = require("./gameDetector");
@@ -716,6 +787,15 @@ app.whenReady().then(() => {
           screenCapture.start();
         } else {
           screenCapture.stop();
+        }
+      }
+
+      // Session tracking: start/end profile sessions with game
+      if (playerProfile) {
+        if (running) {
+          playerProfile.startSession();
+        } else {
+          playerProfile.endSession();
         }
       }
     });
@@ -744,6 +824,8 @@ app.on("will-quit", () => {
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy();
   if (gameDetector) gameDetector.stop();
   if (screenCapture) screenCapture.destroy();
+  if (gameFileWatcher) gameFileWatcher.stop();
+  if (playerProfile) playerProfile.endSession();
 });
 
 app.on("window-all-closed", () => {

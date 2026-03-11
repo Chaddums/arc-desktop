@@ -157,6 +157,71 @@ interface ArcDesktopAPI {
 
   /** Listen for overlay config changes from builder. Returns unsubscribe function. */
   onOverlayConfigChanged: (cb: (config: Record<string, unknown>) => void) => () => void;
+
+  // ─── Player Profile ─────────────────────────────────────────────
+
+  /** Record an item pickup to persistent player profile */
+  recordItemPickup: (itemName: string, quantity: number) => void;
+
+  /** Record an objective completion to persistent player profile */
+  recordObjective: (text: string, type: string, progress?: { current: number; total: number }) => void;
+
+  /** Get full player profile summary */
+  getPlayerProfile: () => Promise<PlayerProfileSummary | null>;
+
+  /** Start a new gameplay session in the profile */
+  startProfileSession: () => void;
+
+  /** End current gameplay session in the profile */
+  endProfileSession: () => void;
+
+  /** Listen for game file changes (recipes, settings). Returns unsubscribe function. */
+  onGameFileUpdate: (cb: (update: { type: string; data: unknown }) => void) => () => void;
+
+  /** Get parsed game resolution from local game config */
+  getGameResolution: () => Promise<{ resolutionX: number; resolutionY: number } | null>;
+
+  /** Force re-scan of game save files */
+  rescanGameFiles: () => void;
+}
+
+interface PlayerProfileSummary {
+  playerId: string | null;
+  lastUpdated: string;
+  items: Record<
+    string,
+    {
+      name: string;
+      totalPickedUp: number;
+      firstSeen: string;
+      lastSeen: string;
+    }
+  >;
+  objectives: Record<
+    string,
+    {
+      text: string;
+      completedCount: number;
+      firstSeen: string;
+      lastSeen: string;
+      progress: { current: number; total: number } | null;
+    }
+  >;
+  recipes: { sourceTypeId: number; sourceLookupId: number; ownerId: string }[];
+  gameSettings: Record<string, string>;
+  sessions: {
+    id: string;
+    startTime: string;
+    endTime: string | null;
+    itemsCollected: number;
+    objectivesCompleted: number;
+  }[];
+  currentSession: {
+    id: string;
+    startTime: string;
+    itemsCollected: number;
+    objectivesCompleted: number;
+  } | null;
 }
 
 declare global {

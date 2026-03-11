@@ -53,6 +53,10 @@ import OverlayMapIntel from "./OverlayMapIntel";
 import OverlayMapPip from "./OverlayMapPip";
 import OverlayStashPip from "./OverlayStashPip";
 import OverlayEventToast from "./OverlayEventToast";
+import OverlayItemFeed from "./OverlayItemFeed";
+import OverlayObjectiveFeed from "./OverlayObjectiveFeed";
+import { useItemPickupTracker } from "../hooks/useItemPickupTracker";
+import { useObjectiveTracker } from "../hooks/useObjectiveTracker";
 
 const SECTION_LABELS: Record<SectionId, string> = {
   statusStrip: "STATUS BAR",
@@ -128,6 +132,8 @@ export default function OverlayHUD() {
   );
   const dailyQuests = useDailyQuests();
   const { menuState } = useMenuDetection();
+  const { recentPickups, sessionTotal, sessionItems } = useItemPickupTracker();
+  const { recentEvents: objectiveEvents, completionCount: objectiveCompletionCount } = useObjectiveTracker();
 
   // Lazy-load stash analysis only when inventory/stash menu detected
   const stashAnalyzedRef = React.useRef(false);
@@ -761,10 +767,19 @@ export default function OverlayHUD() {
         onMouseLeave={handleMouseLeave}
       >
         <OverlayEventToast alerts={eventAlerts} onDismiss={dismissAlert} />
+        <OverlayObjectiveFeed
+          recentEvents={objectiveEvents}
+          completionCount={objectiveCompletionCount}
+        />
         <OverlayQuestProgress
           completionQueue={completionQueue}
           onDismiss={dismissCompletion}
           audioVolume={alertSettings.audioVolume}
+        />
+        <OverlayItemFeed
+          recentPickups={recentPickups}
+          sessionTotal={sessionTotal}
+          sessionItems={sessionItems}
         />
         {/* Only show triggered pips when their section card isn't already enabled */}
         {!enabledSections.has("mapSelectorContext") && (

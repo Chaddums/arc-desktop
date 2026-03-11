@@ -22,14 +22,32 @@ function normalize(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
 }
 
+/** Words that should never trigger a map match on their own */
+const STOPWORDS = new Set([
+  "the", "and", "for", "are", "but", "not", "you", "all", "can",
+  "had", "her", "was", "one", "our", "out", "has", "his", "how",
+  "its", "may", "new", "now", "old", "see", "way", "who", "did",
+  "get", "let", "say", "she", "too", "use", "map", "back", "gate",
+]);
+
 function fuzzyMatch(ocrText: string, mapName: string): number {
   const ocr = normalize(ocrText);
   const name = normalize(mapName);
-  if (ocr.includes(name) || name.includes(ocr)) return 1;
 
-  // Token overlap
-  const ocrTokens = ocr.split(/\s+/).filter((t) => t.length > 2);
-  const nameTokens = name.split(/\s+/).filter((t) => t.length > 2);
+  // Require OCR text to be at least 4 chars to avoid matching stray words
+  if (ocr.length < 4) return 0;
+
+  // Don't match if OCR text is just a common stopword
+  if (STOPWORDS.has(ocr)) return 0;
+
+  // Full name match (OCR contains entire map name, or vice versa)
+  // For "name includes ocr", require OCR to be a significant portion
+  if (ocr.includes(name)) return 1;
+  if (name.includes(ocr) && ocr.length >= name.length * 0.5) return 0.9;
+
+  // Token overlap — filter stopwords from both sides
+  const ocrTokens = ocr.split(/\s+/).filter((t) => t.length > 2 && !STOPWORDS.has(t));
+  const nameTokens = name.split(/\s+/).filter((t) => t.length > 2 && !STOPWORDS.has(t));
   if (nameTokens.length === 0) return 0;
 
   let matches = 0;

@@ -155,4 +155,38 @@ contextBridge.exposeInMainWorld("arcDesktop", {
     ipcRenderer.on("overlay-config-changed", handler);
     return () => ipcRenderer.removeListener("overlay-config-changed", handler);
   },
+
+  // ─── Player Profile ──────────────────────────────────────────
+
+  /** Record an item pickup to persistent player profile */
+  recordItemPickup: (itemName, quantity) => {
+    ipcRenderer.send("profile-record-item", itemName, quantity);
+  },
+
+  /** Record an objective event to persistent player profile */
+  recordObjective: (text, type, progress) => {
+    ipcRenderer.send("profile-record-objective", text, type, progress);
+  },
+
+  /** Get full player profile summary */
+  getPlayerProfile: () => ipcRenderer.invoke("get-player-profile"),
+
+  /** Start a new gameplay session */
+  startProfileSession: () => ipcRenderer.send("profile-start-session"),
+
+  /** End current gameplay session */
+  endProfileSession: () => ipcRenderer.send("profile-end-session"),
+
+  /** Listen for game file updates (recipes, resolution, settings) */
+  onGameFileUpdate: (cb) => {
+    const handler = (_event, update) => cb(update);
+    ipcRenderer.on("game-file-update", handler);
+    return () => ipcRenderer.removeListener("game-file-update", handler);
+  },
+
+  /** Get game resolution from local config */
+  getGameResolution: () => ipcRenderer.invoke("get-game-resolution"),
+
+  /** Force re-scan of game save files */
+  rescanGameFiles: () => ipcRenderer.send("rescan-game-files"),
 });
