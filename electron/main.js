@@ -1,3 +1,32 @@
+const Sentry = require("@sentry/electron/main");
+const pkg = require("../package.json");
+
+Sentry.init({
+  dsn: "https://c79123acce6f3c5f59435abf57664c04@o4511131557036032.ingest.us.sentry.io/4511131742306305",
+  release: `arc-desktop@${pkg.version}`,
+  environment: "desktop",
+  tracesSampleRate: 0.1,
+  beforeSend(event) {
+    // Redact tokens, keys, and secrets from event extras/context
+    const sensitivePattern = /token|key|secret|password|credential|auth/i;
+    if (event.extra) {
+      for (const k of Object.keys(event.extra)) {
+        if (sensitivePattern.test(k)) event.extra[k] = "[REDACTED]";
+      }
+    }
+    if (event.contexts) {
+      for (const ctx of Object.values(event.contexts)) {
+        if (ctx && typeof ctx === "object") {
+          for (const k of Object.keys(ctx)) {
+            if (sensitivePattern.test(k)) ctx[k] = "[REDACTED]";
+          }
+        }
+      }
+    }
+    return event;
+  },
+});
+
 const {
   app,
   BrowserWindow,

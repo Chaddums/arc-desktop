@@ -9,11 +9,15 @@
  */
 
 import React, { Component, useState, useCallback } from "react";
+import * as Sentry from "@sentry/electron/renderer";
 import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { View, Text, useWindowDimensions, Platform } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+
+// Initialize Sentry in the renderer process
+Sentry.init({});
 
 import IntelScreen from "./src/screens/IntelScreen";
 import LoadoutScreen from "./src/screens/LoadoutScreen";
@@ -43,6 +47,7 @@ class OverlayErrorBoundary extends Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error("[OverlayHUD crash]", error, info.componentStack);
+    Sentry.captureException(error, { contexts: { react: { componentStack: info.componentStack } } });
   }
 
   render() {
